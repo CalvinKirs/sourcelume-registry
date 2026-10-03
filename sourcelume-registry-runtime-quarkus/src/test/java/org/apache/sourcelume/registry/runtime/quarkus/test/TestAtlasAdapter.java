@@ -19,9 +19,11 @@ package org.apache.sourcelume.registry.runtime.quarkus.test;
 import io.quarkus.test.Mock;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.io.InputStream;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 
@@ -74,5 +76,13 @@ public class TestAtlasAdapter implements AtlasAdapter {
     @Override
     public SourcelumeDatasetDto getDatasetByGuid(String guid) {
         return byGuid.get(guid);
+    }
+
+    @Override
+    public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+        return byQualifiedName.values().stream()
+                .filter(d -> d.getRecordStatus() == status)
+                .limit(limit)
+                .toList();
     }
 }
