@@ -32,7 +32,7 @@
   <name>Apache Sourcelume Registry - Atlas Adapter</name>
 
   <description>Thin REST client implementation of the framework-free AtlasAdapter
-        SPI, shared by the Quarkus REST runtime and the ingest worker. Talks
+        SPI, used by the Quarkus REST runtime. Talks
         to the Apache Atlas REST API directly (JDK HttpClient, Jackson),
         without atlas-client-v2 / atlas-intg. The adapter code itself is
         framework-free; it carries Quarkus annotations (CDI scope, config

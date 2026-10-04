@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.sourcelume.registry.ingest.worker.service;
+package org.apache.sourcelume.registry.runtime.quarkus.ingest.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,17 +33,11 @@ import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.apache.sourcelume.registry.core.validation.ValidatorChain;
 
 /**
- * The ingest pipeline: validate a PENDING record's raw JSON-LD and promote
- * it to ACTIVE or INCOMPLETE.
- *
- * <p>Validation is result-based, not exception-based: the chain runs
- * directly (errors-only contract), a failed validation is a <em>state</em>
- * (INCOMPLETE), not an error. The stored document is never modified — the
- * byte-identical rawJsonLd travels with the entity through every state.
- *
- * <p>Adapter failures are deliberately not caught here: the scheduler
- * decides what a failed round means for scheduling, and the record simply
- * stays PENDING.
+ * The ingest pipeline: validate a submitted record through the plugin
+ * chain and store the verdict on the entity. Called synchronously by the
+ * REST resource today — and it is the same method a queue consumer would
+ * call the day a slow validation step (attestation, and only then a real
+ * queue) makes asynchronous processing worth its price.
  */
 @ApplicationScoped
 public class IngestServiceImpl implements IngestService {
@@ -60,59 +54,45 @@ public class IngestServiceImpl implements IngestService {
     }
 
     @Override
-    public IngestResult process(SourcelumeDatasetDto pendingDataset) {
-        Objects.requireNonNull(pendingDataset, "pendingDataset");
+    public IngestResult process(SourcelumeDatasetDto submitted) {
+        Objects.requireNonNull(submitted, "submitted");
 
-        // The polled snapshot may be stale: a corrected resubmission can
-        // land between the poll and this write. Re-read and only proceed if
-        // the record is unchanged — otherwise skip: a verdict derived from
-        // the old document must never overwrite a fresh submission, and the
-        // next poll picks up the new state anyway.
-        SourcelumeDatasetDto current = atlasAdapter.getDatasetByQualifiedName(pendingDataset.getQualifiedName());
-        if (!isStillThePolledRecord(pendingDataset, current)) {
-            return new IngestResult(pendingDataset.getQualifiedName(), RecordStatus.PENDING, null);
-        }
+        ValidationResult validation = validatorChain.validate(submitted.getRawJsonLd());
+        SourcelumeDatasetDto verdict =
+                validation.conforms() ? promoteToActive(submitted) : markIncomplete(submitted, validation);
 
-        ValidationResult validation = validatorChain.validate(current.getRawJsonLd());
-        SourcelumeDatasetDto promoted =
-                validation.conforms() ? promoteToActive(current) : markIncomplete(current, validation);
-
-        atlasAdapter.createOrUpdateDatasetEntity(promoted);
-        return new IngestResult(promoted.getQualifiedName(), promoted.getRecordStatus(), validation);
+        atlasAdapter.createOrUpdateDatasetEntity(verdict);
+        return new IngestResult(verdict.getQualifiedName(), verdict.getRecordStatus(), validation);
     }
 
-    private static boolean isStillThePolledRecord(SourcelumeDatasetDto polled, SourcelumeDatasetDto current) {
-        return current != null
-                && current.getRecordStatus() == RecordStatus.PENDING
-                && Objects.equals(current.getRawJsonLd(), polled.getRawJsonLd());
-    }
-
-    private SourcelumeDatasetDto promoteToActive(SourcelumeDatasetDto pending) {
+    private SourcelumeDatasetDto promoteToActive(SourcelumeDatasetDto submitted) {
         // Conforms → the record parses and satisfies schema and shapes, so
         // the mapped provenance attributes (name, licenseId, sourceUri) are
         // safe to write. qualifiedName comes from the record's own id.
-        SourcelumeDatasetDto active =
-                ProvenanceRecordMapper.toDatasetEntity(ProvenanceRecordMapper.map(pending.getRawJsonLd()));
-        active.setGuid(pending.getGuid());
-        active.setRecordStatus(RecordStatus.ACTIVE);
-        active.setRawJsonLd(pending.getRawJsonLd());
-        // Explicit clear — see CLEARED_VALIDATION_ISSUES.
-        active.setValidationIssues(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES);
-        return active;
+        SourcelumeDatasetDto promoted =
+                ProvenanceRecordMapper.toDatasetEntity(ProvenanceRecordMapper.map(submitted.getRawJsonLd()));
+        promoted.setGuid(submitted.getGuid());
+        promoted.setRecordStatus(RecordStatus.ACTIVE);
+        promoted.setRawJsonLd(submitted.getRawJsonLd());
+        // Explicit clear — see CLEARED_VALIDATION_ISSUES. A resubmitted
+        // record previously stored its failure report, and the Atlas
+        // upsert merges attributes: an absent attribute keeps its value.
+        promoted.setValidationIssues(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES);
+        return promoted;
     }
 
-    private SourcelumeDatasetDto markIncomplete(SourcelumeDatasetDto pending, ValidationResult validation) {
+    private SourcelumeDatasetDto markIncomplete(SourcelumeDatasetDto submitted, ValidationResult validation) {
         // Does not conform → the record may lack fields the entity mapping
         // needs, so nothing is mapped; only the lifecycle verdict is stored.
         SourcelumeDatasetDto incomplete = new SourcelumeDatasetDto();
-        incomplete.setQualifiedName(pending.getQualifiedName());
-        incomplete.setGuid(pending.getGuid());
+        incomplete.setQualifiedName(submitted.getQualifiedName());
+        incomplete.setGuid(submitted.getGuid());
         // Atlas requires a name on every entity write (mandatory on the
-        // Asset supertype), so the placeholder from the PENDING write must
-        // travel along — the verdict would otherwise be rejected.
-        incomplete.setName(pending.getName());
+        // Asset supertype), so the placeholder name travels along — the
+        // verdict would otherwise be rejected.
+        incomplete.setName(submitted.getName());
         incomplete.setRecordStatus(RecordStatus.INCOMPLETE);
-        incomplete.setRawJsonLd(pending.getRawJsonLd());
+        incomplete.setRawJsonLd(submitted.getRawJsonLd());
         incomplete.setValidationIssues(toIssuesJson(validation.issues()));
         return incomplete;
     }
