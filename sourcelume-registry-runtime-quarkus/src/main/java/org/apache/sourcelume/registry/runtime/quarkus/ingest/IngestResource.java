@@ -17,6 +17,8 @@
 package org.apache.sourcelume.registry.runtime.quarkus.ingest;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -33,30 +35,39 @@ import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.common.mapper.ProvenanceRecordMapper;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
+import org.apache.sourcelume.registry.core.ingest.IngestResult;
+import org.apache.sourcelume.registry.core.ingest.IngestService;
+import org.apache.sourcelume.registry.core.validation.ValidationResult;
 
 /**
- * Ingest endpoints. {@code POST /records} stores a submitted record as a
- * PENDING entity — byte-identical, keyed by the record IRI — and returns
- * immediately; the ingest worker validates and promotes it asynchronously.
- * {@code GET /records/{id}} reports where the record is in that lifecycle.
+ * Ingest endpoints. {@code POST /records} validates a submitted record
+ * synchronously through the ingest pipeline and stores it with its
+ * verdict — byte-identical, keyed by the record IRI — answering with
+ * {@code 201} (new record) or {@code 200} (corrected resubmission of an
+ * INCOMPLETE record) and the verdict in the body. {@code GET /records/{id}}
+ * reports the stored state.
  *
- * <p>The API never validates: a record's validity is a state, not a
- * gate. The guarantee is "no record is ACTIVE without validation".
+ * <p>Every stored record carries its validation verdict: VALIDATED is
+ * published (consumers filter on it), INCOMPLETE carries its issues and
+ * stays curatable.
  *
- * <p>Status codes: {@code 202} with a Location header on acceptance; a
- * record that is already PENDING or ACTIVE is rejected with {@code 409};
- * an INCOMPLETE record accepts a corrected resubmission (returning it to
- * PENDING); a document without a usable {@code id} is {@code 400}; an
- * unknown record on GET is {@code 404}.
+ * <p>Status codes: {@code 201}/{@code 200} with a Location header; a
+ * record that is already VALIDATED is rejected with {@code 409}; a
+ * document without a usable {@code id} is {@code 400}; an unknown record
+ * on GET is {@code 404}.
  */
 @Path("/records")
 public class IngestResource {
 
     private final AtlasAdapter atlasAdapter;
+    private final IngestService ingestService;
+    private final ObjectMapper objectMapper;
 
     @Inject
-    IngestResource(AtlasAdapter atlasAdapter) {
+    IngestResource(AtlasAdapter atlasAdapter, IngestService ingestService, ObjectMapper objectMapper) {
         this.atlasAdapter = atlasAdapter;
+        this.ingestService = ingestService;
+        this.objectMapper = objectMapper;
     }
 
     @POST
@@ -73,26 +84,31 @@ public class IngestResource {
         }
 
         SourcelumeDatasetDto existing = atlasAdapter.getDatasetByQualifiedName(recordId);
-        if (existing != null && existing.getRecordStatus() != RecordStatus.INCOMPLETE) {
+        if (existing != null && existing.getRecordStatus() == RecordStatus.VALIDATED) {
             return Response.status(409)
                     .entity(new ConflictResponse(recordId, existing.getRecordStatus()))
                     .build();
         }
 
-        SourcelumeDatasetDto pending = new SourcelumeDatasetDto();
-        pending.setQualifiedName(recordId);
-        pending.setRecordStatus(RecordStatus.PENDING);
-        pending.setRawJsonLd(rawJsonLd);
-        pending.setName(placeholderName(recordId));
+        // Inline validation: the same IngestService a queue consumer
+        // would call the day a slow validation step makes a real queue
+        // worth its price. The record reaches the store only with its
+        // verdict.
+        SourcelumeDatasetDto submitted = new SourcelumeDatasetDto();
+        submitted.setQualifiedName(recordId);
+        submitted.setRawJsonLd(rawJsonLd);
+        // Atlas requires a name on every entity write; a conforming
+        // record's promotion overwrites the placeholder with the mapped
+        // name, an INCOMPLETE verdict keeps it.
+        submitted.setName(placeholderName(recordId));
         if (existing != null) {
-            // Explicit clear — see CLEARED_VALIDATION_ISSUES.
-            pending.setValidationIssues(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES);
+            submitted.setGuid(existing.getGuid());
         }
-        atlasAdapter.createOrUpdateDatasetEntity(pending);
+        IngestResult result = ingestService.process(submitted);
 
-        return Response.status(202)
+        return Response.status(existing == null ? 201 : 200)
                 .location(locationOf(recordId))
-                .entity(new AcceptedResponse(recordId, RecordStatus.PENDING))
+                .entity(IngestResponse.of(result, objectMapper))
                 .build();
     }
 
@@ -125,8 +141,27 @@ public class IngestResource {
         return URI.create("/records/" + encoded);
     }
 
-    /** Wire DTO for the 202 response: what was accepted, and where to watch it. */
-    public record AcceptedResponse(String qualifiedName, RecordStatus recordStatus) {}
+    /**
+     * Wire DTO for the verdict response: the record's id, its status, and
+     * — for an INCOMPLETE record — the issues to fix.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record IngestResponse(String qualifiedName, RecordStatus recordStatus, String validationIssues) {
+
+        static IngestResponse of(IngestResult result, ObjectMapper objectMapper) {
+            String issues =
+                    result.validation().issues().isEmpty() ? null : toIssuesJson(result.validation(), objectMapper);
+            return new IngestResponse(result.qualifiedName(), result.status(), issues);
+        }
+
+        private static String toIssuesJson(ValidationResult validation, ObjectMapper objectMapper) {
+            try {
+                return objectMapper.writeValueAsString(validation.issues());
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("Could not serialize validation issues", e);
+            }
+        }
+    }
 
     /** Wire DTO for the 409 response: what is in the way, and in which state. */
     public record ConflictResponse(String qualifiedName, RecordStatus recordStatus) {}

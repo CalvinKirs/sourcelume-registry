@@ -69,14 +69,14 @@ class RestAtlasAdapterSearchTest {
         serve(
                 200,
                 "{\"entities\": ["
-                        + entity("guid-1", "PENDING", "https://example.org/records/one")
-                        + ", " + entity("guid-2", "PENDING", "https://example.org/records/two") + "]}");
+                        + entity("guid-1", "VALIDATED", "https://example.org/records/one")
+                        + ", " + entity("guid-2", "VALIDATED", "https://example.org/records/two") + "]}");
 
-        List<SourcelumeDatasetDto> found = adapter.findDatasetsByStatus(RecordStatus.PENDING, 10);
+        List<SourcelumeDatasetDto> found = adapter.findDatasetsByStatus(RecordStatus.VALIDATED, 10);
 
         assertEquals(2, found.size());
         assertEquals("guid-1", found.get(0).getGuid());
-        assertEquals(RecordStatus.PENDING, found.get(0).getRecordStatus());
+        assertEquals(RecordStatus.VALIDATED, found.get(0).getRecordStatus());
         assertEquals("{\"id\": \"one\"}", found.get(0).getRawJsonLd());
         assertNull(found.get(0).getValidationIssues());
 
@@ -87,7 +87,7 @@ class RestAtlasAdapterSearchTest {
         assertEquals(
                 "recordStatus", body.path("entityFilters").path("attributeName").asText());
         assertEquals(
-                "PENDING", body.path("entityFilters").path("attributeValue").asText());
+                "VALIDATED", body.path("entityFilters").path("attributeValue").asText());
         // Without the explicit attributes list Atlas returns headers only
         // and callers would see empty documents.
         JsonNode attributes = body.path("attributes");
@@ -105,7 +105,7 @@ class RestAtlasAdapterSearchTest {
     void emptySearchResultYieldsAnEmptyList() throws IOException {
         serve(200, "{\"queryType\": \"BASIC\", \"searchParameters\": {}}");
 
-        List<SourcelumeDatasetDto> found = adapter.findDatasetsByStatus(RecordStatus.PENDING, 10);
+        List<SourcelumeDatasetDto> found = adapter.findDatasetsByStatus(RecordStatus.VALIDATED, 10);
 
         assertNotNull(found);
         assertTrue(found.isEmpty());
@@ -115,17 +115,17 @@ class RestAtlasAdapterSearchTest {
     void backendErrorFailsLoudly() throws IOException {
         serve(500, "{\"errorMessage\": \"boom\"}");
 
-        assertThrows(AtlasAdapterException.class, () -> adapter.findDatasetsByStatus(RecordStatus.PENDING, 10));
+        assertThrows(AtlasAdapterException.class, () -> adapter.findDatasetsByStatus(RecordStatus.VALIDATED, 10));
     }
 
     @Test
     void lookupMapsTheLifecycleFields() throws IOException {
         // The unique-attribute endpoint answers with AtlasEntityWithExtInfo.
-        serve(200, "{\"entity\": " + entity("guid-9", "ACTIVE", "https://example.org/records/nine") + "}");
+        serve(200, "{\"entity\": " + entity("guid-9", "VALIDATED", "https://example.org/records/nine") + "}");
 
         SourcelumeDatasetDto dto = adapter.getDatasetByQualifiedName("https://example.org/records/nine");
 
-        assertEquals(RecordStatus.ACTIVE, dto.getRecordStatus());
+        assertEquals(RecordStatus.VALIDATED, dto.getRecordStatus());
         assertEquals("guid-9", dto.getGuid());
         assertEquals("https://example.org/records/nine", dto.getQualifiedName());
         assertEquals("nine", dto.getName());
@@ -148,7 +148,7 @@ class RestAtlasAdapterSearchTest {
         SourcelumeDatasetDto dto = new SourcelumeDatasetDto();
         dto.setQualifiedName("https://example.org/records/one");
         dto.setName("one");
-        dto.setRecordStatus(RecordStatus.PENDING);
+        dto.setRecordStatus(RecordStatus.VALIDATED);
         dto.setRawJsonLd("{\"id\": \"https://example.org/records/one\"}");
         dto.setValidationIssues("[{\"message\": \"m\"}]");
 
@@ -160,7 +160,7 @@ class RestAtlasAdapterSearchTest {
                 .path("entities")
                 .get(0)
                 .path("attributes");
-        assertEquals("PENDING", attributes.path("recordStatus").asText());
+        assertEquals("VALIDATED", attributes.path("recordStatus").asText());
         assertEquals(
                 "{\"id\": \"https://example.org/records/one\"}",
                 attributes.path("rawJsonLd").asText());

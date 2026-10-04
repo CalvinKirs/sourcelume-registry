@@ -21,7 +21,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
@@ -32,28 +31,22 @@ import java.util.UUID;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
-import org.apache.sourcelume.registry.core.ingest.IngestResult;
-import org.apache.sourcelume.registry.core.validation.ValidatorChain;
 import org.apache.sourcelume.registry.runtime.quarkus.bootstrap.AtlasBootstrapService;
-import org.apache.sourcelume.registry.runtime.quarkus.ingest.service.IngestServiceImpl;
 import org.junit.jupiter.api.Test;
 
 /**
- * End-to-end ingest pipeline against a real Apache Atlas 2.5.0 backend:
- * REST submission, the exact worker promotion code, and status queries —
- * the automated counterpart of the manual docker-compose round.
+ * End-to-end ingest against a real Apache Atlas 2.5.0 backend: the
+ * synchronous pipeline — REST submission, inline validation, verdict
+ * storage — automated as the counterpart of the manual docker-compose
+ * round.
  *
- * <p>The promotion runs inline (the worker has no REST trigger, its
- * scheduler drives the same {@code IngestService} implementation), so the
- * whole chain is exercised synchronously per test. Each test rewrites the
- * record id to a unique IRI: the Atlas instance is shared across tests and
- * stores what earlier tests submitted.
+ * <p>Each test rewrites the record id to a unique IRI: the Atlas
+ * instance is shared across tests and stores what earlier tests
+ * submitted.
  */
 @QuarkusTest
 @TestProfile(AtlasITProfile.class)
 class IngestPipelineIT {
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Inject
     AtlasAdapter atlasAdapter;
@@ -62,7 +55,7 @@ class IngestPipelineIT {
     AtlasBootstrapService bootstrapService;
 
     @Test
-    void validRecordIsPromotedToActive() throws Exception {
+    void validRecordIsAnsweredWithItsVerdict() throws Exception {
         String recordId = uniqueId("valid");
         String body = fixture("/records/it-valid.jsonld", recordId);
 
@@ -71,27 +64,24 @@ class IngestPipelineIT {
                 .when()
                 .post("/records")
                 .then()
-                .statusCode(202)
+                .statusCode(201)
+                .body("qualifiedName", org.hamcrest.Matchers.equalTo(recordId))
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"))
                 .extract()
                 .header("Location");
 
-        promote(recordId);
-
-        // The location carries the percent-encoded record IRI; REST Assured
-        // must not re-encode it (the server route matches the encoded form).
+        // The status view agrees, with the mapped attributes.
         given().urlEncodingEnabled(false)
                 .when()
                 .get(location.replaceFirst("^https?://[^/]+", ""))
                 .then()
                 .statusCode(200)
-                .body("qualifiedName", org.hamcrest.Matchers.equalTo(recordId))
-                .body("recordStatus", org.hamcrest.Matchers.equalTo("ACTIVE"))
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"))
                 .body("name", org.hamcrest.Matchers.equalTo("Minimal example record"))
                 .body("licenseId", org.hamcrest.Matchers.equalTo("https://www.apache.org/licenses/LICENSE-2.0"));
 
-        // The ACTIVE view must not surface a stale or sentinel issue list.
         SourcelumeDatasetDto stored = atlasAdapter.getDatasetByQualifiedName(recordId);
-        assertEquals(RecordStatus.ACTIVE, stored.getRecordStatus());
+        assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
         assertEquals(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES, stored.getValidationIssues());
     }
 
@@ -105,9 +95,8 @@ class IngestPipelineIT {
                 .when()
                 .post("/records")
                 .then()
-                .statusCode(202);
-
-        promote(recordId);
+                .statusCode(201)
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("INCOMPLETE"));
 
         SourcelumeDatasetDto stored = atlasAdapter.getDatasetByQualifiedName(recordId);
         assertEquals(RecordStatus.INCOMPLETE, stored.getRecordStatus());
@@ -116,7 +105,7 @@ class IngestPipelineIT {
     }
 
     @Test
-    void correctedResubmissionClearsIssuesAndPromotes() throws Exception {
+    void correctedResubmissionClearsIssuesAndValidates() throws Exception {
         String recordId = uniqueId("resubmit");
         String invalid = fixture("/records/it-invalid.jsonld", recordId);
         String valid = fixture("/records/it-valid.jsonld", recordId);
@@ -126,28 +115,24 @@ class IngestPipelineIT {
                 .when()
                 .post("/records")
                 .then()
-                .statusCode(202);
-        promote(recordId);
+                .statusCode(201);
 
-        // The corrected record goes back to PENDING, old issues cleared.
+        // The corrected record is validated in place of the old verdict.
         given().contentType("application/ld+json")
                 .body(valid)
                 .when()
                 .post("/records")
                 .then()
-                .statusCode(202);
-        SourcelumeDatasetDto pending = atlasAdapter.getDatasetByQualifiedName(recordId);
-        assertEquals(RecordStatus.PENDING, pending.getRecordStatus());
-        assertEquals(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES, pending.getValidationIssues());
-
-        promote(recordId);
+                .statusCode(200)
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"));
 
         SourcelumeDatasetDto stored = atlasAdapter.getDatasetByQualifiedName(recordId);
-        assertEquals(RecordStatus.ACTIVE, stored.getRecordStatus());
+        assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
+        assertEquals(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES, stored.getValidationIssues());
     }
 
     @Test
-    void duplicateSubmissionIsRejectedWhilePending() throws Exception {
+    void validatedRecordRejectsDuplicateSubmission() throws Exception {
         String recordId = uniqueId("duplicate");
         String body = fixture("/records/it-valid.jsonld", recordId);
 
@@ -156,14 +141,14 @@ class IngestPipelineIT {
                 .when()
                 .post("/records")
                 .then()
-                .statusCode(202);
+                .statusCode(201);
         given().contentType("application/ld+json")
                 .body(body)
                 .when()
                 .post("/records")
                 .then()
                 .statusCode(409)
-                .body("recordStatus", org.hamcrest.Matchers.equalTo("PENDING"));
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"));
     }
 
     @Test
@@ -177,20 +162,6 @@ class IngestPipelineIT {
     }
 
     // --- helpers ---
-
-    /**
-     * Runs the worker's promotion step inline: the same validator chain and
-     * the same {@code IngestService} implementation the scheduler calls.
-     */
-    private void promote(String recordId) {
-        IngestServiceImpl ingestService = new IngestServiceImpl(ValidatorChain.discover(), atlasAdapter, MAPPER);
-        SourcelumeDatasetDto pending = atlasAdapter.getDatasetByQualifiedName(recordId);
-        assertNotNull(pending, "the submitted record must be readable before promotion");
-        assertEquals(RecordStatus.PENDING, pending.getRecordStatus());
-        IngestResult result = ingestService.process(pending);
-        assertEquals(recordId, result.qualifiedName());
-        assertNotNull(result.validation(), "promotion must produce a verdict");
-    }
 
     private static String uniqueId(String test) {
         return "https://sourcelume.apache.org/records/it-" + test + "-" + UUID.randomUUID();

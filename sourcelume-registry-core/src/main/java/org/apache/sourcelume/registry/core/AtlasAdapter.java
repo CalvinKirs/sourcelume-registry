@@ -94,9 +94,9 @@ public interface AtlasAdapter {
     }
 
     /**
-     * Returns the datasets currently in the given record status — the poll
-     * the ingest worker uses to pick up PENDING records. Implementations
-     * never return null; an empty list means nothing is waiting.
+     * Returns the datasets currently in the given record status — the
+     * search consumers use to filter on VALIDATED records. Implementations
+     * never return null; an empty list means nothing matches.
      *
      * @param status the record status to look for
      * @param limit  the maximum number of datasets to return

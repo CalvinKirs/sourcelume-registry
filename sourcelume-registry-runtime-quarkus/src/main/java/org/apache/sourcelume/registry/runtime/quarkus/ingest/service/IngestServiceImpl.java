@@ -59,26 +59,26 @@ public class IngestServiceImpl implements IngestService {
 
         ValidationResult validation = validatorChain.validate(submitted.getRawJsonLd());
         SourcelumeDatasetDto verdict =
-                validation.conforms() ? promoteToActive(submitted) : markIncomplete(submitted, validation);
+                validation.conforms() ? promoteToValidated(submitted) : markIncomplete(submitted, validation);
 
         atlasAdapter.createOrUpdateDatasetEntity(verdict);
         return new IngestResult(verdict.getQualifiedName(), verdict.getRecordStatus(), validation);
     }
 
-    private SourcelumeDatasetDto promoteToActive(SourcelumeDatasetDto submitted) {
+    private SourcelumeDatasetDto promoteToValidated(SourcelumeDatasetDto submitted) {
         // Conforms → the record parses and satisfies schema and shapes, so
         // the mapped provenance attributes (name, licenseId, sourceUri) are
         // safe to write. qualifiedName comes from the record's own id.
-        SourcelumeDatasetDto promoted =
+        SourcelumeDatasetDto verdict =
                 ProvenanceRecordMapper.toDatasetEntity(ProvenanceRecordMapper.map(submitted.getRawJsonLd()));
-        promoted.setGuid(submitted.getGuid());
-        promoted.setRecordStatus(RecordStatus.ACTIVE);
-        promoted.setRawJsonLd(submitted.getRawJsonLd());
+        verdict.setGuid(submitted.getGuid());
+        verdict.setRecordStatus(RecordStatus.VALIDATED);
+        verdict.setRawJsonLd(submitted.getRawJsonLd());
         // Explicit clear — see CLEARED_VALIDATION_ISSUES. A resubmitted
         // record previously stored its failure report, and the Atlas
         // upsert merges attributes: an absent attribute keeps its value.
-        promoted.setValidationIssues(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES);
-        return promoted;
+        verdict.setValidationIssues(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES);
+        return verdict;
     }
 
     private SourcelumeDatasetDto markIncomplete(SourcelumeDatasetDto submitted, ValidationResult validation) {
