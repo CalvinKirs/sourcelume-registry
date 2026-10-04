@@ -17,6 +17,7 @@
 package org.apache.sourcelume.registry.runtime.quarkus.ingest.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -77,6 +78,19 @@ class IngestServiceImplTest {
                 SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES,
                 upserted.getValidationIssues(),
                 "a validated promotion must explicitly clear a previous INCOMPLETE verdict");
+        assertVerdictContext(upserted, validRecord);
+    }
+
+    /** sha256 travels with the submission; the chain and the timestamp are stamped by the pipeline. */
+    private static void assertVerdictContext(SourcelumeDatasetDto upserted, String rawDocument) {
+        assertEquals(
+                Digests.sha256Hex(rawDocument.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                upserted.getSha256(),
+                "the digest of the received bytes travels with the verdict");
+        assertTrue(
+                upserted.getValidatedBy().contains("json"),
+                "the chain ids name the validators that judged the record: " + upserted.getValidatedBy());
+        assertNotNull(upserted.getValidatedAt(), "the verdict carries its timestamp");
     }
 
     @Test
@@ -95,6 +109,8 @@ class IngestServiceImplTest {
         assertEquals(invalidRecord, upserted.getRawJsonLd());
         assertNull(upserted.getName(), "nothing is mapped for an INCOMPLETE record");
         assertNull(upserted.getLicenseId());
+
+        assertVerdictContext(upserted, invalidRecord);
 
         JsonNode issues = new ObjectMapper().readTree(upserted.getValidationIssues());
         assertTrue(issues.isArray(), "stored issues are a JSON array");
@@ -118,6 +134,8 @@ class IngestServiceImplTest {
         SourcelumeDatasetDto dto = new SourcelumeDatasetDto();
         dto.setQualifiedName(qualifiedName);
         dto.setRawJsonLd(rawJsonLd);
+        // the digest the REST layer computes over the received bytes
+        dto.setSha256(Digests.sha256Hex(rawJsonLd.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         // no status: the pipeline assigns the verdict — submissions carry none.
         return dto;
     }

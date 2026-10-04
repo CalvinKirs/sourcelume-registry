@@ -91,7 +91,7 @@ class RestAtlasAdapterSearchTest {
         // Without the explicit attributes list Atlas returns headers only
         // and callers would see empty documents.
         JsonNode attributes = body.path("attributes");
-        assertTrue(attributes.isArray() && attributes.size() == 8, "the lifecycle attributes must be requested");
+        assertTrue(attributes.isArray() && attributes.size() == 11, "the lifecycle attributes must be requested");
         for (String wanted : new String[] {"rawJsonLd", "recordStatus"}) {
             boolean listed = false;
             for (JsonNode attribute : attributes) {

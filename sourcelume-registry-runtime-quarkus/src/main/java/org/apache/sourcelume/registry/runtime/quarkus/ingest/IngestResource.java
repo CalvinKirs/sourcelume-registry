@@ -73,7 +73,8 @@ public class IngestResource {
     @POST
     @Consumes({MediaType.APPLICATION_JSON, "application/ld+json"})
     @Produces(MediaType.APPLICATION_JSON)
-    public Response submit(String rawJsonLd) {
+    public Response submit(byte[] received) {
+        String rawJsonLd = new String(received, StandardCharsets.UTF_8);
         String recordId;
         try {
             recordId = ProvenanceRecordMapper.extractRecordId(rawJsonLd);
@@ -97,6 +98,9 @@ public class IngestResource {
         SourcelumeDatasetDto submitted = new SourcelumeDatasetDto();
         submitted.setQualifiedName(recordId);
         submitted.setRawJsonLd(rawJsonLd);
+        // The digest covers the received bytes, not the decoded string —
+        // "byte for byte" for real, e.g. for later signature checks.
+        submitted.setSha256(sha256Hex(received));
         // Atlas requires a name on every entity write; a conforming
         // record's promotion overwrites the placeholder with the mapped
         // name, an INCOMPLETE verdict keeps it.
@@ -136,6 +140,22 @@ public class IngestResource {
         return candidate.isBlank() ? recordId : candidate;
     }
 
+    /** Hex SHA-256 over the received bytes. */
+    private static String sha256Hex(byte[] received) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(received);
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
     private static URI locationOf(String recordId) {
         String encoded = URLEncoder.encode(recordId, StandardCharsets.UTF_8).replace("+", "%20");
         return URI.create("/records/" + encoded);
@@ -146,12 +166,24 @@ public class IngestResource {
      * — for an INCOMPLETE record — the issues to fix.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record IngestResponse(String qualifiedName, RecordStatus recordStatus, String validationIssues) {
+    public record IngestResponse(
+            String qualifiedName,
+            RecordStatus recordStatus,
+            String validationIssues,
+            String sha256,
+            String validatedBy,
+            String validatedAt) {
 
         static IngestResponse of(IngestResult result, ObjectMapper objectMapper) {
             String issues =
                     result.validation().issues().isEmpty() ? null : toIssuesJson(result.validation(), objectMapper);
-            return new IngestResponse(result.qualifiedName(), result.status(), issues);
+            return new IngestResponse(
+                    result.qualifiedName(),
+                    result.status(),
+                    issues,
+                    result.sha256(),
+                    result.validatedBy(),
+                    result.validatedAt());
         }
 
         private static String toIssuesJson(ValidationResult validation, ObjectMapper objectMapper) {

@@ -83,6 +83,9 @@ class IngestPipelineIT {
         SourcelumeDatasetDto stored = atlasAdapter.getDatasetByQualifiedName(recordId);
         assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
         assertEquals(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES, stored.getValidationIssues());
+        assertEquals(64, stored.getSha256().length(), "the entity carries the received-bytes digest");
+        assertTrue(stored.getValidatedBy().contains("json"), "the entity names the chain");
+        assertNotNull(stored.getValidatedAt(), "the entity carries the verdict timestamp");
     }
 
     @Test
