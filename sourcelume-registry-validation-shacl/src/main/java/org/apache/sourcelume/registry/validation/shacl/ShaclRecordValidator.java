@@ -110,7 +110,7 @@ public final class ShaclRecordValidator implements RecordValidator {
         if (payload == null) {
             throw new IllegalStateException("Bundled context has no top-level @context member: " + contextResource);
         }
-        this.contextInliner = new JsonLdContextInliner(contextResource, payload);
+        this.contextInliner = new JsonLdContextInliner(SpecResourceLoader.CANONICAL_CONTEXT_IRI, payload);
     }
 
     @Override

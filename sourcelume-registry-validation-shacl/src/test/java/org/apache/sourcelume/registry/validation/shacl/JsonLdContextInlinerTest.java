@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 
 class JsonLdContextInlinerTest {
 
-    private static final String CONTEXT_RESOURCE = "context/0.0.1/sourcelume.jsonld";
+    private static final String CANONICAL_IRI = "https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private JsonLdContextInliner inliner;
@@ -35,31 +35,35 @@ class JsonLdContextInlinerTest {
     void setUp() throws Exception {
         JsonNode payload =
                 MAPPER.readTree("{\"license\": {\"@id\": \"http://purl.org/dc/terms/license\", \"@type\": \"@id\"}}");
-        inliner = new JsonLdContextInliner(CONTEXT_RESOURCE, payload);
+        inliner = new JsonLdContextInliner(CANONICAL_IRI, payload);
     }
 
     @Test
-    void relativeReferenceIsReplaced() throws Exception {
-        JsonLdContextInliner.InlineResult result =
-                inliner.inline("{\"@context\": \"../" + CONTEXT_RESOURCE + "\", \"id\": \"https://example.org/r\"}");
-        assertTrue(result.hasAnyContext());
-        assertTrue(result.refusals().isEmpty());
-        JsonNode context = MAPPER.readTree(result.document()).get("@context");
-        assertTrue(context.isObject());
-        assertNotNull(context.get("license"));
+    void relativeReferenceIsRefused() throws Exception {
+        JsonLdContextInliner.InlineResult result = inliner.inline(
+                "{\"@context\": \"../context/0.0.1/sourcelume.jsonld\", \"id\": \"https://example.org/r\"}");
+        assertNull(result.document());
+        assertTrue(result.refusals().get(0).contains("../context/0.0.1/sourcelume.jsonld"));
     }
 
     @Test
-    void absoluteReferenceIsReplaced() throws Exception {
-        JsonLdContextInliner.InlineResult result =
-                inliner.inline("{\"@context\": \"https://sourcelume.apache.org/" + CONTEXT_RESOURCE + "\"}");
+    void canonicalReferenceIsReplaced() throws Exception {
+        JsonLdContextInliner.InlineResult result = inliner.inline("{\"@context\": \"" + CANONICAL_IRI + "\"}");
         assertTrue(MAPPER.readTree(result.document()).get("@context").isObject());
     }
 
     @Test
+    void foreignHostWithSamePathIsRefused() throws Exception {
+        JsonLdContextInliner.InlineResult result =
+                inliner.inline("{\"@context\": \"https://attacker.example/context/0.0.1/sourcelume.jsonld\"}");
+        assertNull(result.document());
+        assertTrue(result.refusals().get(0).contains("attacker.example"));
+    }
+
+    @Test
     void arrayFormReferenceIsReplacedElementWise() throws Exception {
-        JsonLdContextInliner.InlineResult result = inliner.inline("{\"@context\": [\"https://sourcelume.apache.org/"
-                + CONTEXT_RESOURCE + "\", {\"name\": \"https://schema.org/name\"}]}");
+        JsonLdContextInliner.InlineResult result =
+                inliner.inline("{\"@context\": [\"" + CANONICAL_IRI + "\", {\"name\": \"https://schema.org/name\"}]}");
         assertTrue(result.refusals().isEmpty());
         JsonNode context = MAPPER.readTree(result.document()).get("@context");
         assertTrue(context.isArray());
@@ -95,8 +99,8 @@ class JsonLdContextInlinerTest {
 
     @Test
     void importInsideContextArrayElementIsRefused() throws Exception {
-        JsonLdContextInliner.InlineResult result = inliner.inline("{\"@context\": [\"../" + CONTEXT_RESOURCE
-                + "\", {\"@import\": \"https://attacker.example/c.jsonld\"}]}");
+        JsonLdContextInliner.InlineResult result = inliner.inline(
+                "{\"@context\": [\"" + CANONICAL_IRI + "\", {\"@import\": \"https://attacker.example/c.jsonld\"}]}");
         assertNull(result.document());
         assertTrue(result.refusals().get(0).contains("@import"));
     }
@@ -167,7 +171,7 @@ class JsonLdContextInlinerTest {
             if (i > 0) {
                 doc.append(',');
             }
-            doc.append("{\"@context\": \"../").append(CONTEXT_RESOURCE).append("\"}");
+            doc.append("{\"@context\": \"").append(CANONICAL_IRI).append("\"}");
         }
         doc.append(']');
         JsonLdContextInliner.InlineResult result = inliner.inline(doc.toString());
@@ -179,8 +183,8 @@ class JsonLdContextInlinerTest {
 
     @Test
     void nestedNodeObjectsAreHandled() throws Exception {
-        JsonLdContextInliner.InlineResult result = inliner.inline("{\"@context\": \"../" + CONTEXT_RESOURCE + "\","
-                + " \"creator\": [{\"name\": \"x\", \"@context\": \"../" + CONTEXT_RESOURCE + "\"}]}");
+        JsonLdContextInliner.InlineResult result = inliner.inline("{\"@context\": \"" + CANONICAL_IRI + "\","
+                + " \"creator\": [{\"name\": \"x\", \"@context\": \"" + CANONICAL_IRI + "\"}]}");
         assertTrue(result.refusals().isEmpty());
         JsonNode node = MAPPER.readTree(result.document());
         assertTrue(node.get("@context").isObject());
@@ -191,7 +195,7 @@ class JsonLdContextInlinerTest {
     @Test
     void refusalReportingIsCapped() throws Exception {
         StringBuilder doc = new StringBuilder("{");
-        doc.append("\"@context\": \"").append(CONTEXT_RESOURCE).append("\",");
+        doc.append("\"@context\": \"").append(CANONICAL_IRI).append("\",");
         doc.append("\"creator\": [");
         int distinctUnknown = JsonLdContextInliner.MAX_REPORTED_REFUSALS + 5;
         for (int i = 0; i < distinctUnknown; i++) {

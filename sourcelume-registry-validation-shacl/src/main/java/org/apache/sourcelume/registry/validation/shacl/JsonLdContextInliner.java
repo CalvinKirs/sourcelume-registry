@@ -29,13 +29,12 @@ import java.util.Map;
  * Inlines the bundled sourcelume JSON-LD context into a document before
  * RDF expansion, so SHACL validation runs fully offline.
  *
- * <p>Documents reference the context by IRI (the spec currently defines no
- * canonical absolute context IRI, so examples use a relative path). Fetching
- * whatever IRI an ingested document names would make validation dependent
- * on network access and would allow ingest payloads to direct the validator
- * at arbitrary hosts (SSRF). Instead, any reference ending in the bundled
- * context resource path is replaced with the context carried in the spec
- * artifact; any other context reference is refused.
+ * <p>Documents must reference the context by its canonical IRI
+ * ({@code SpecResourceLoader.CANONICAL_CONTEXT_IRI}). Fetching whatever IRI an
+ * ingested document names would make validation depend on network access and
+ * would allow ingest payloads to direct the validator at arbitrary hosts
+ * (SSRF). Instead, a reference equal to the canonical IRI is replaced with the
+ * context carried in the spec artifact; any other context reference is refused.
  *
  * <p>Refused - not just unrecognized - are all constructs that would make the
  * RDF parser retrieve a remote document, so the offline guarantee is
@@ -45,8 +44,8 @@ import java.util.Map;
  * and for term-scoped {@code @context} references inside term definitions
  * (string or array form); all of these are covered here:
  * <ul>
- *   <li>string {@code @context} references anywhere in the document must end
- *       in the bundled context resource path (anything else is refused),</li>
+ *   <li>string {@code @context} references anywhere in the document must equal
+ *       the canonical context IRI (anything else is refused),</li>
  *   <li>{@code @import} inside an inline context is refused outright, and</li>
  *   <li>term-scoped {@code @context} references are refused in both string
  *       and array form (scoped context <em>objects</em> are legal and
@@ -101,18 +100,17 @@ final class JsonLdContextInliner {
         }
     }
 
-    private final String contextResource;
+    private final String canonicalContextIri;
     private final JsonNode contextPayload;
 
     /**
-     * @param contextResource the bundled context resource path, used to recognize
-     *                        references to it (relative or absolute; matched by suffix)
+     * @param canonicalContextIri the one context IRI accepted in documents (exact match)
      * @param contextPayload  the {@code @context} payload (the value of the context
      *                        document's top-level {@code @context} member, not the
      *                        whole context document)
      */
-    JsonLdContextInliner(String contextResource, JsonNode contextPayload) {
-        this.contextResource = contextResource;
+    JsonLdContextInliner(String canonicalContextIri, JsonNode contextPayload) {
+        this.canonicalContextIri = canonicalContextIri;
         this.contextPayload = contextPayload;
     }
 
@@ -283,7 +281,7 @@ final class JsonLdContextInliner {
      * rejects the whole document and the tree is never serialized.
      */
     private JsonNode resolveReference(String reference, InlineState state) {
-        if (!reference.endsWith(contextResource)) {
+        if (!reference.equals(canonicalContextIri)) {
             state.refuse(
                     "unknown context reference '" + reference + "' (only the bundled sourcelume context is accepted)");
         } else if (++state.replacements > MAX_CONTEXT_REPLACEMENTS
