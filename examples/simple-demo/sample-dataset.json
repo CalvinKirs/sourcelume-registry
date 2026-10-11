@@ -1,0 +1,7 @@
+{
+  "qualifiedName": "sourcelume://datasets/glasgow-hackathon-corpus-v1",
+  "name": "Glasgow Hackathon Instruction Corpus v1",
+  "description": "Curated instruction tuning dataset created during Community Over Code Glasgow 2026 Hackathon with verified SPDX license provenance.",
+  "sourceUri": "https://huggingface.co/datasets/apache/glasgow-hackathon-corpus-v1",
+  "licenseId": "Apache-2.0"
+}

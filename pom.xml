@@ -167,6 +167,8 @@
         <configuration>
           <excludes>
             <exclude>.git-blame-ignore-revs</exclude>
+            <!-- JSON-LD data records cannot contain comments without breaking JSON parsing -->
+            <exclude>**/*.jsonld</exclude>
           </excludes>
         </configuration>
         <executions>
