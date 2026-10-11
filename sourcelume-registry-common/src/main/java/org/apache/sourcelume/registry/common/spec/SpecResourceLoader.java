@@ -30,6 +30,9 @@ public final class SpecResourceLoader {
 
     private static final Logger log = LoggerFactory.getLogger(SpecResourceLoader.class);
 
+    /** The one context IRI a record may reference (see spec/0.0.1, JSON-LD context). */
+    public static final String CANONICAL_CONTEXT_IRI = "https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld";
+
     public static final String DEFAULT_CONTEXT_RESOURCE = "context/0.0.1/sourcelume.jsonld";
     public static final String DEFAULT_SCHEMA_RESOURCE = "schema/0.0.1/sourcelume.schema.json";
     public static final String DEFAULT_SHACL_RESOURCE = "schema/0.0.1/sourcelume.shacl.ttl";
