@@ -200,13 +200,14 @@ class RecordValidationResourceTest {
                 .then()
                 .statusCode(422)
                 .body("conforms", equalTo(false))
-                .body("issues[0].validatorId", equalTo("shacl"));
+                .body("issues[0].validatorId", equalTo("json-schema"));
     }
 
     /**
-     * Adversarial regression on the wire layer: an empty inline context is
-     * invisible to JSON Schema but expands to no focus node; the SHACL
-     * stage must refuse it rather than conform vacuously.
+     * Adversarial regression on the wire layer: an empty inline context would
+     * expand to no focus node and let the shapes conform vacuously. The
+     * spec's schema accepts only the canonical context IRI, so the schema
+     * stage refuses it first.
      */
     @Test
     void emptyInlineContextIsRefusedThroughEndpoint() {
@@ -234,6 +235,6 @@ class RecordValidationResourceTest {
                 .then()
                 .statusCode(422)
                 .body("conforms", equalTo(false))
-                .body("issues[0].validatorId", equalTo("shacl"));
+                .body("issues[0].validatorId", equalTo("json-schema"));
     }
 }

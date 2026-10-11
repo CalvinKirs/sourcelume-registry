@@ -63,20 +63,29 @@ class JsonLdContextInlinerTest {
     @Test
     void arrayFormReferenceIsReplacedElementWise() throws Exception {
         JsonLdContextInliner.InlineResult result =
-                inliner.inline("{\"@context\": [\"" + CANONICAL_IRI + "\", {\"name\": \"https://schema.org/name\"}]}");
+                inliner.inline("{\"@context\": [\"" + CANONICAL_IRI + "\", \"" + CANONICAL_IRI + "\"]}");
         assertTrue(result.refusals().isEmpty());
         JsonNode context = MAPPER.readTree(result.document()).get("@context");
         assertTrue(context.isArray());
         assertTrue(context.get(0).isObject());
-        assertEquals("https://schema.org/name", context.get(1).get("name").asText());
+        assertTrue(context.get(1).isObject());
     }
 
     @Test
-    void inlineContextObjectIsPassedThrough() throws Exception {
-        String doc = "{\"@context\": {\"name\": \"https://schema.org/name\"}}";
-        JsonLdContextInliner.InlineResult result = inliner.inline(doc);
-        assertTrue(result.refusals().isEmpty());
-        assertEquals(MAPPER.readTree(doc), MAPPER.readTree(result.document()));
+    void inlineContextObjectIsRefused() throws Exception {
+        JsonLdContextInliner.InlineResult result =
+                inliner.inline("{\"@context\": {\"name\": \"https://schema.org/name\"}}");
+        assertNull(result.document());
+        assertEquals(1, result.refusals().size());
+        assertTrue(result.refusals().get(0).contains("inline @context objects are not accepted"));
+    }
+
+    @Test
+    void inlineContextObjectInsideArrayIsRefused() throws Exception {
+        JsonLdContextInliner.InlineResult result =
+                inliner.inline("{\"@context\": [\"" + CANONICAL_IRI + "\", {\"name\": \"https://schema.org/name\"}]}");
+        assertNull(result.document());
+        assertTrue(result.refusals().get(0).contains("inline @context objects are not accepted"));
     }
 
     @Test
@@ -145,14 +154,14 @@ class JsonLdContextInlinerTest {
                 inliner.inline("{\"@context\": null, \"id\": \"https://example.org/r\"}");
         assertNull(result.document());
         assertTrue(result.hasAnyContext());
-        assertTrue(result.refusals().get(0).contains("must be a string, array, or object"));
+        assertTrue(result.refusals().get(0).contains("must be a string or array"));
     }
 
     @Test
     void scalarContextValueIsRefused() throws Exception {
         JsonLdContextInliner.InlineResult result = inliner.inline("{\"@context\": 5}");
         assertTrue(result.hasAnyContext());
-        assertTrue(result.refusals().get(0).contains("must be a string, array, or object"));
+        assertTrue(result.refusals().get(0).contains("must be a string or array"));
     }
 
     @Test

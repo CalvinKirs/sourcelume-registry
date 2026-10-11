@@ -75,7 +75,7 @@ public final class ShaclRecordValidator implements RecordValidator {
      * for example when an inline context redefines the "type" term mapping.
      * Such graphs are refused instead (see validate).
      */
-    static final String PROVENANCE_RECORD_CLASS = "https://sourcelume.apache.org/ns/0.0.1#ProvenanceRecord";
+    static final String PROVENANCE_RECORD_CLASS = "https://sourcelume.apache.org/ns#ProvenanceRecord";
 
     private final Shapes shapes;
     private final JsonLdContextInliner contextInliner;

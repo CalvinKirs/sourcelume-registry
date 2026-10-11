@@ -36,8 +36,8 @@
         Part of the modular RecordValidator plugin architecture: this module
         provides the semantic validation stage ("shacl", order 200) and registers
         itself via META-INF/services. It inlines the bundled JSON-LD context from
-        sourcelume-spec (no remote context fetching — records submitted with a
-        relative context reference are resolved locally) and runs the spec's
+        sourcelume-spec for records that reference its canonical IRI (no remote
+        context fetching; any other context reference is refused) and runs the spec's
         SHACL shapes (sourcelume.shacl.ttl) against the expanded RDF graph.
 
         Heavier than the JSON Schema plugin by design (~18 MB of Jena

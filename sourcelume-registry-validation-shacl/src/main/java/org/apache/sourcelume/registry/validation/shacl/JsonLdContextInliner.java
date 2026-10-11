@@ -52,8 +52,9 @@ import java.util.Map;
  *       scanned recursively).</li>
  * </ul>
  *
- * <p>Inline context objects are passed through unchanged otherwise: they are
- * already local, and their term definitions are visible to the RDF parser.
+ * <p>Inline context objects are refused as well (after being scanned for the
+ * constructs above): their term definitions could change what a record
+ * means, and the spec allows only the canonical IRI.
  * Both amplification channels are bounded: the number of replacements (an
  * ingest-controlled document made of repeated context references would
  * otherwise be amplified by the full context payload per occurrence) and
@@ -81,6 +82,14 @@ final class JsonLdContextInliner {
      * the HTTP response).
      */
     static final int MAX_REPORTED_REFUSALS = 10;
+
+    /**
+     * Inline context objects could redefine what a term means, so the spec
+     * allows only the canonical IRI. The object is still scanned first, so
+     * retrieval triggers inside it are reported before this refusal.
+     */
+    static final String INLINE_CONTEXT_REFUSAL =
+            "inline @context objects are not accepted (only the canonical context IRI)";
 
     /**
      * The result of inlining a document.
@@ -205,9 +214,10 @@ final class JsonLdContextInliner {
                     resolved.add(resolveReference(element.asText(), state));
                 } else if (element.isObject()) {
                     scanContextObject((ObjectNode) element, state);
+                    state.refuse(INLINE_CONTEXT_REFUSAL);
                     resolved.add(element);
                 } else {
-                    state.refuse("@context array elements must be strings or objects, not " + element.getNodeType());
+                    state.refuse("@context array elements must be strings, not " + element.getNodeType());
                     resolved.add(element);
                 }
             }
@@ -215,9 +225,10 @@ final class JsonLdContextInliner {
         }
         if (context.isObject()) {
             scanContextObject((ObjectNode) context, state);
+            state.refuse(INLINE_CONTEXT_REFUSAL);
             return context;
         }
-        state.refuse("@context must be a string, array, or object, not " + context.getNodeType());
+        state.refuse("@context must be a string or array, not " + context.getNodeType());
         return context;
     }
 

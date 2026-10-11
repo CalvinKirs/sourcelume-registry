@@ -88,29 +88,30 @@ class ValidatorChainDiscoveryTest {
     }
 
     /**
-     * A document the SHACL plugin refuses (remote context) is still evaluated
-     * by the schema stage first; the refusal ends the chain.
+     * The spec's JSON Schema pins @context to the canonical IRI, so a foreign
+     * context is refused by the schema stage and the fail-fast chain never
+     * reaches SHACL. (The SHACL stage refuses it on its own as well, see
+     * ShaclRecordValidatorTest.)
      */
     @Test
-    void remoteContextRefusalSurfacesThroughChain() {
+    void foreignContextIsRefusedBySchemaStageBeforeShacl() {
         ValidationResult result = chain.validate(record("unknown-remote-context.jsonld"));
         assertFalse(result.conforms());
-        assertTrue(result.issues().stream()
-                .anyMatch(i -> "shacl".equals(i.validatorId()) && i.message().contains("unknown context reference")));
+        assertTrue(result.issues().stream().allMatch(i -> "json-schema".equals(i.validatorId())));
+        assertTrue(result.issues().stream().anyMatch(i -> "/@context".equals(i.path())));
     }
 
     /**
-     * Adversarial case for the trivial-conformance guard: an empty inline
-     * context is invisible to JSON Schema (conforms) but expands to no
-     * focus node - the SHACL stage must refuse it rather than conform
-     * vacuously.
+     * Adversarial case: an empty inline context would expand to no focus
+     * node and let the shapes conform vacuously. The schema stage now refuses
+     * any @context other than the canonical IRI, so the chain stops there.
      */
     @Test
-    void emptyInlineContextPassesSchemaButIsRefusedByShacl() {
+    void emptyInlineContextIsRefusedBySchemaStage() {
         ValidationResult result = chain.validate(record("empty-inline-context.jsonld"));
         assertFalse(result.conforms());
-        assertTrue(result.issues().stream().allMatch(i -> "shacl".equals(i.validatorId())));
-        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("trivially conform")));
+        assertTrue(result.issues().stream().allMatch(i -> "json-schema".equals(i.validatorId())));
+        assertTrue(result.issues().stream().anyMatch(i -> "/@context".equals(i.path())));
     }
 
     private static String record(String name) {

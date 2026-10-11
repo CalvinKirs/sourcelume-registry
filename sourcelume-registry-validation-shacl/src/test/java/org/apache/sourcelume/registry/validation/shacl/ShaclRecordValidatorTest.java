@@ -18,9 +18,12 @@ package org.apache.sourcelume.registry.validation.shacl;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import org.apache.sourcelume.registry.common.spec.SpecResourceLoader;
 import org.apache.sourcelume.registry.core.validation.ValidationIssue;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.junit.jupiter.api.BeforeAll;
@@ -39,6 +42,20 @@ class ShaclRecordValidatorTest {
     void idAndOrderAreStable() {
         assertEquals("shacl", validator.id());
         assertEquals(200, validator.order());
+    }
+
+    /**
+     * The class the trivial-conformance guard looks for must be the one the
+     * bundled context expands {@code ProvenanceRecord} to. If the spec moves
+     * its namespace and this constant is not updated, every valid record
+     * would be refused, so the two are compared directly.
+     */
+    @Test
+    void provenanceRecordClassMatchesTheBundledContextNamespace() throws IOException {
+        JsonNode context = new ObjectMapper()
+                .readTree(SpecResourceLoader.loadResourceString(SpecResourceLoader.DEFAULT_CONTEXT_RESOURCE))
+                .get("@context");
+        assertEquals(context.get("sl").asText() + "ProvenanceRecord", ShaclRecordValidator.PROVENANCE_RECORD_CLASS);
     }
 
     @Test
@@ -117,29 +134,41 @@ class ShaclRecordValidatorTest {
     void nullContextValueIsRefused() {
         ValidationResult result = validator.validate(record("null-context.jsonld"));
         assertFalse(result.conforms());
-        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("must be a string, array, or object")));
+        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("must be a string or array")));
     }
 
     /**
-     * Trivial-conformance guard: an empty inline context leaves all terms
-     * unexpanded, so no sl:ProvenanceRecord focus node exists and the
-     * shapes would conform vacuously. The validator must refuse instead.
+     * An empty inline context would leave all terms unexpanded, so no
+     * sl:ProvenanceRecord focus node would exist and the shapes would
+     * conform vacuously. Inline context objects are refused outright.
      */
     @Test
-    void emptyInlineContextYieldsNoFocusNodeAndIsRefused() {
+    void emptyInlineContextIsRefused() {
         ValidationResult result = validator.validate(record("empty-inline-context.jsonld"));
         assertFalse(result.conforms());
-        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("trivially conform")));
+        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("inline @context objects")));
     }
 
     /**
-     * Same guard for the array form: an inline element overriding the
-     * "type" term mapping de-types the node even though the bundled
-     * context is referenced as well.
+     * Same for the array form: an inline element overriding the "type"
+     * term mapping would de-type the node even though the bundled context
+     * is referenced as well.
      */
     @Test
-    void contextArrayTypeOverrideIsRefusedByFocusNodeGuard() {
+    void contextArrayTypeOverrideIsRefused() {
         ValidationResult result = validator.validate(record("context-array-override.jsonld"));
+        assertFalse(result.conforms());
+        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("inline @context objects")));
+    }
+
+    /**
+     * Trivial-conformance guard, still needed with the canonical context: a
+     * record whose type does not expand to sl:ProvenanceRecord has no focus
+     * node, so the shapes would conform vacuously. The validator must refuse.
+     */
+    @Test
+    void recordOfAnotherTypeYieldsNoFocusNodeAndIsRefused() {
+        ValidationResult result = validator.validate(record("wrong-type.jsonld"));
         assertFalse(result.conforms());
         assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("trivially conform")));
     }
