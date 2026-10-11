@@ -84,7 +84,24 @@ fi
 
 # Step 1: Health Check
 echo -e "${BOLD}${BLUE}[Step 1/5] System Readiness & Health Probe (${REGISTRY_URL}/q/health/ready)${RESET}"
-echo -e "  ${YELLOW}Showing:${RESET} Active health probe confirming registry connectivity to Apache Atlas."
+echo -e "  ${YELLOW}Showing:${RESET} Active health probe confirming registry connectivity to Apache Atlas.\n"
+cat << "EOF"
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. GET /q/health/ready                  |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Probe Atlas connectivity / status      |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  3. Connection OK (HTTP 200 / UP)          |
+             |                                          | <----------------------------------------- |
+             |  4. Health check JSON (status: UP)       |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+EOF
+echo ""
 HEALTH_JSON=$(curl -s -f "${REGISTRY_URL}/q/health/ready" 2>/dev/null || true)
 
 if [ -z "${HEALTH_JSON}" ]; then
@@ -106,7 +123,30 @@ echo -e "${GREEN}✓ Registry status is UP (Connected to Apache Atlas backend).$
 # Step 2: Inspect Atlas Typedefs
 echo -e "${BOLD}${BLUE}[Step 2/5] Automatic Atlas Type Bootstrapping (/api/v1/types/typedefs)${RESET}"
 echo -e "  ${YELLOW}Showing:${RESET} Zero-configuration initialization — Sourcelume bootstraps custom entity"
-echo -e "           types ('sourcelume_dataset') into Atlas extending core DataSet attributes."
+echo -e "           types ('sourcelume_dataset') into Atlas extending core DataSet attributes.\n"
+cat << "EOF"
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |                                          |  [On Startup: Auto-Bootstrap Typedefs]     |
+             |                                          |  1. Read model (sourcelume_model.json)     |
+             |                                          |  2. POST /api/atlas/v2/types/typedefs      |
+             |                                          | -----------------------------------------> |
+             |                                          |     Register sourcelume_dataset type       |
+             |                                          |                                            |
+             |  3. GET /api/v1/types/typedefs           |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  4. Fetch registered type definitions      |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  5. Return Atlas entity & struct defs      |
+             |                                          | <----------------------------------------- |
+             |  6. Return active Typedef JSON           |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+EOF
+echo ""
 TYPEDEFS=$(curl -s "${REGISTRY_URL}/api/v1/types/typedefs")
 ENTITY_DEFS_COUNT=$(echo "${TYPEDEFS}" | jq '.entityDefs | length')
 echo -e "  • Total Entity Definitions loaded: ${BOLD}${ENTITY_DEFS_COUNT}${RESET}"
@@ -119,7 +159,27 @@ echo -e "${GREEN}✓ Type system successfully bootstrapped in Apache Atlas.${RES
 
 # Step 3: Register Dataset
 echo -e "${BOLD}${BLUE}[Step 3/5] Dataset Registration & Validation (POST /api/v1/datasets)${RESET}"
-echo -e "  ${YELLOW}Showing:${RESET} Ingesting dataset metadata with Jakarta Validation and Atlas persistence."
+echo -e "  ${YELLOW}Showing:${RESET} Ingesting dataset metadata with Jakarta Validation and Atlas persistence.\n"
+cat << "EOF"
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. POST /api/v1/datasets                |                                            |
+             |     (Payload: qualifiedName, etc.)       |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Validate DTO (Jakarta Validation)      |
+             |                                          |  3. Map DTO -> sourcelume_dataset Entity   |
+             |                                          | -----------------------------------------> |
+             |                                          |     Persist entity into Atlas graph        |
+             |                                          |                                            |
+             |                                          |  4. Assigned Graph GUID & Indexed          |
+             |                                          | <----------------------------------------- |
+             |  5. Return DTO with assigned GUID        |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+EOF
+echo ""
 echo -e "${CYAN}Ingestion Payload (${DATASET_FILE}):${RESET}"
 cat "${DATASET_FILE}" | jq .
 
@@ -142,7 +202,25 @@ echo -e "  • Assigned Atlas Graph GUID: ${BOLD}${ASSIGNED_GUID}${RESET}\n"
 
 # Step 4: Query Dataset by qualifiedName
 echo -e "${BOLD}${BLUE}[Step 4/5] Domain-Key Query (/api/v1/datasets?qualifiedName=...)${RESET}"
-echo -e "  ${YELLOW}Showing:${RESET} Upstream pipelines can retrieve metadata using canonical dataset URIs."
+echo -e "  ${YELLOW}Showing:${RESET} Upstream pipelines can retrieve metadata using canonical dataset URIs.\n"
+cat << "EOF"
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |  ML Pipeline / Tool  |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. GET /api/v1/datasets                 |                                            |
+             |     ?qualifiedName=sourcelume://...      |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Query Atlas by unique qualifiedName    |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  3. Return matched Entity data             |
+             |                                          | <----------------------------------------- |
+             |  4. Return JSON dataset attributes       |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+EOF
+echo ""
 FETCH_BY_QN=$(curl -s "${REGISTRY_URL}/api/v1/datasets?qualifiedName=${QUALIFIED_NAME}")
 echo "${FETCH_BY_QN}" | jq .
 echo -e "${GREEN}✓ Domain-key resolution verified successfully.${RESET}\n"
@@ -150,7 +228,24 @@ echo -e "${GREEN}✓ Domain-key resolution verified successfully.${RESET}\n"
 # Step 5: Query Dataset by GUID
 if [ -n "${ASSIGNED_GUID}" ]; then
   echo -e "${BOLD}${BLUE}[Step 5/5] Backend-Key Query (/api/v1/datasets/guid/...)${RESET}"
-  echo -e "  ${YELLOW}Showing:${RESET} Downstream governance tools access entities directly via Atlas GUIDs."
+  echo -e "  ${YELLOW}Showing:${RESET} Downstream governance tools access entities directly via Atlas GUIDs.\n"
+  cat << "EOF"
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |  Governance / Audit  |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. GET /api/v1/datasets/guid/{guid}     |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Direct Graph node lookup by Atlas GUID |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  3. Return Entity graph node attributes    |
+             |                                          | <----------------------------------------- |
+             |  4. Return JSON dataset attributes       |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+EOF
+  echo ""
   FETCH_BY_GUID=$(curl -s "${REGISTRY_URL}/api/v1/datasets/guid/${ASSIGNED_GUID}")
   echo "${FETCH_BY_GUID}" | jq .
   echo -e "${GREEN}✓ Internal GUID resolution verified successfully.${RESET}\n"

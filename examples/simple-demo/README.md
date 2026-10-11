@@ -80,6 +80,24 @@ The automated script walks through 5 verification stages:
 ### Step 1: System Readiness & Health Probe (`/q/health/ready`)
 - **What it does**: Issues a SmallRye Health check against the Quarkus registry runtime.
 - **What you are showing**: Sourcelume actively monitors its connection to the Apache Atlas backend. If Atlas is reachable, the registry reports `UP` and is ready for traffic.
+
+```text
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. GET /q/health/ready                  |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Probe Atlas connectivity / status      |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  3. Connection OK (HTTP 200 / UP)          |
+             |                                          | <----------------------------------------- |
+             |  4. Health check JSON (status: UP)       |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+```
+
 ```bash
 curl -s http://localhost:8082/q/health/ready | jq .
 ```
@@ -87,6 +105,30 @@ curl -s http://localhost:8082/q/health/ready | jq .
 ### Step 2: Automatic Atlas Type Bootstrapping (`/api/v1/types/typedefs`)
 - **What it does**: Queries the registry to inspect active entity type definitions in Apache Atlas.
 - **What you are showing**: Zero manual Atlas configuration required. On startup, Sourcelume automatically registered the `sourcelume_dataset` type (derived from `sourcelume_model.json`), extending Atlas's native `DataSet` type hierarchy with attributes like `sourceUri` and `licenseId`.
+
+```text
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |                                          |  [On Startup: Auto-Bootstrap Typedefs]     |
+             |                                          |  1. Read model (sourcelume_model.json)     |
+             |                                          |  2. POST /api/atlas/v2/types/typedefs      |
+             |                                          | -----------------------------------------> |
+             |                                          |     Register sourcelume_dataset type       |
+             |                                          |                                            |
+             |  3. GET /api/v1/types/typedefs           |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  4. Fetch registered type definitions      |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  5. Return Atlas entity & struct defs      |
+             |                                          | <----------------------------------------- |
+             |  6. Return active Typedef JSON           |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+```
+
 ```bash
 # Inspect all registered typedefs
 curl -s http://localhost:8082/api/v1/types/typedefs | jq .
@@ -100,6 +142,27 @@ curl -s http://localhost:8082/api/v1/types/dataset | jq .
 - **What you are showing**:
   - The registry validates input fields against Jakarta Validation rules and spec definitions (`qualifiedName`, `licenseId`, `sourceUri`).
   - It creates the entity inside Apache Atlas and returns a newly minted Atlas internal `guid` alongside its domain URI.
+
+```text
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. POST /api/v1/datasets                |                                            |
+             |     (Payload: qualifiedName, etc.)       |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Validate DTO (Jakarta Validation)      |
+             |                                          |  3. Map DTO -> sourcelume_dataset Entity   |
+             |                                          | -----------------------------------------> |
+             |                                          |     Persist entity into Atlas graph        |
+             |                                          |                                            |
+             |                                          |  4. Assigned Graph GUID & Indexed          |
+             |                                          | <----------------------------------------- |
+             |  5. Return DTO with assigned GUID        |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+```
+
 ```bash
 curl -s -X POST http://localhost:8082/api/v1/datasets \
   -H "Content-Type: application/json" \
@@ -109,6 +172,25 @@ curl -s -X POST http://localhost:8082/api/v1/datasets \
 ### Step 4: Domain-Key Query (`GET /api/v1/datasets?qualifiedName=...`)
 - **What it does**: Queries the dataset using its canonical URI identifier (`sourcelume://datasets/glasgow-hackathon-corpus-v1`).
 - **What you are showing**: Upstream ML pipelines, curators, and compliance tools can retrieve dataset metadata using meaningful domain URIs without needing to know internal database identifiers.
+
+```text
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |  ML Pipeline / Tool  |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. GET /api/v1/datasets                 |                                            |
+             |     ?qualifiedName=sourcelume://...      |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Query Atlas by unique qualifiedName    |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  3. Return matched Entity data             |
+             |                                          | <----------------------------------------- |
+             |  4. Return JSON dataset attributes       |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+```
+
 ```bash
 curl -s "http://localhost:8082/api/v1/datasets?qualifiedName=sourcelume://datasets/glasgow-hackathon-corpus-v1" | jq .
 ```
@@ -116,6 +198,24 @@ curl -s "http://localhost:8082/api/v1/datasets?qualifiedName=sourcelume://datase
 ### Step 5: Backend-Key Query (`GET /api/v1/datasets/guid/...`)
 - **What it does**: Queries the dataset using its internal Atlas GUID (`ASSIGNED_GUID`).
 - **What you are showing**: Downstream governance tools and Atlas-native services have direct access to entities via their persistent graph GUIDs.
+
+```text
+  +----------------------+             +----------------------------------+             +-------------------------+
+  |  Governance / Audit  |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  +----------------------+             +----------------------------------+             +-------------------------+
+             |                                          |                                            |
+             |  1. GET /api/v1/datasets/guid/{guid}     |                                            |
+             | ---------------------------------------> |                                            |
+             |                                          |  2. Direct Graph node lookup by Atlas GUID |
+             |                                          | -----------------------------------------> |
+             |                                          |                                            |
+             |                                          |  3. Return Entity graph node attributes    |
+             |                                          | <----------------------------------------- |
+             |  4. Return JSON dataset attributes       |                                            |
+             | <--------------------------------------- |                                            |
+             |                                          |                                            |
+```
+
 ```bash
 curl -s "http://localhost:8082/api/v1/datasets/guid/<ASSIGNED_GUID>" | jq .
 ```
