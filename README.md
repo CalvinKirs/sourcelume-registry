@@ -102,6 +102,10 @@ curl -s http://localhost:8082/api/v1/types/typedefs | jq .
 curl -s http://localhost:8082/api/v1/types/dataset | jq .
 ```
 
+## Examples
+
+- **Simple Demo (`examples/simple-demo`)**: A self-contained, automated walkthrough (referencing the Community Over Code Glasgow 2026 Hackathon) demonstrating registry health verification, Atlas typedef inspection, dataset registration, and query resolution. See [examples/simple-demo/README.md](examples/simple-demo/README.md).
+
 ## Get involved
 
 - Mailing list: dev@sourcelume.apache.org ([archives](https://lists.apache.org/list.html?dev@sourcelume.apache.org))
