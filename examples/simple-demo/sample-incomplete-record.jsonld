@@ -1,0 +1,26 @@
+{
+  "@context": "https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld",
+  "id": "https://sourcelume.apache.org/records/rec-glasgow-hackathon-001",
+  "type": "ProvenanceRecord",
+  "identifier": "sourcelume://datasets/glasgow-hackathon-corpus-v1",
+  "name": "Glasgow Hackathon Instruction Corpus v1 (Draft)",
+  "version": "1.0.0",
+  "creator": [
+    {
+      "type": "schema:Organization",
+      "name": "Community Over Code Glasgow 2026 Hackathon Team",
+      "role": "originator"
+    }
+  ],
+  "created": "2026-10-11T09:00:00Z",
+  "added": "2026-10-11T10:00:00Z",
+  "contentCreated": "2026-10-11T08:30:00Z",
+  "origin": "Curated multi-turn instruction data assembled during Community Over Code Glasgow 2026 Hackathon (initial unreviewed draft missing license declaration).",
+  "custodyChain": [
+    {
+      "agent": "https://sourcelume.apache.org/agents/glasgow-curator-01",
+      "action": "dataset_ingestion_and_validation",
+      "startTime": "2026-10-11T10:00:00Z"
+    }
+  ]
+}

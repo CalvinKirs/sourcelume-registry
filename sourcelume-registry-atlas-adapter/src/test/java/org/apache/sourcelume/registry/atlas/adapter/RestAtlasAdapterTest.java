@@ -17,25 +17,51 @@
 package org.apache.sourcelume.registry.atlas.adapter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.sourcelume.registry.atlas.adapter.config.SourcelumeAtlasProperties;
+import org.apache.sourcelume.registry.common.dto.RecordStatus;
+import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter.TypeDefinitionModel;
+import org.apache.sourcelume.registry.core.exception.AtlasAdapterException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests {@link RestAtlasAdapter#loadTypeDefs(String)} — the one proof step
- * that does not need a running Atlas: it reads the bundled typedef JSON from
- * the classpath and parses it. The adapter is instantiated directly: its CDI
- * annotations are inert outside a container, so no Quarkus bootstrap is
- * needed for this test.
+ * Tests for {@link RestAtlasAdapter}.
  */
 class RestAtlasAdapterTest {
 
-    private final RestAtlasAdapter adapter = new RestAtlasAdapter(stubProperties(), new ObjectMapper());
+    private HttpServer server;
+    private RestAtlasAdapter adapter;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @BeforeEach
+    void setUp() throws IOException {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.start();
+        String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+        adapter = new RestAtlasAdapter(stubProperties(baseUrl), objectMapper);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (server != null) {
+            server.stop(0);
+        }
+    }
 
     @Test
     void shouldLoadBundledTypeDefs() {
@@ -48,11 +74,133 @@ class RestAtlasAdapterTest {
         assertTrue(json.contains("sourcelume_dataset"), "typedef JSON should contain sourcelume_dataset");
     }
 
-    private SourcelumeAtlasProperties stubProperties() {
+    @Test
+    void shouldThrowWhenTypeDefsResourceMissing() {
+        assertThrows(AtlasAdapterException.class, () -> adapter.loadTypeDefs("nonexistent/path/model.json"));
+    }
+
+    @Test
+    void testCreateOrUpdateDatasetEntityWithCreatedEntities() {
+        serve(
+                200,
+                "{\"createdEntities\":[{\"guid\":\"new-guid-1\",\"typeName\":\"sourcelume_dataset\"}],\"mutatedEntities\":{}}");
+        SourcelumeDatasetDto dataset = new SourcelumeDatasetDto();
+        dataset.setQualifiedName("https://rec/new");
+        dataset.setName("New Dataset");
+        dataset.setDescription("Description");
+        dataset.setSourceUri("https://source/uri");
+        dataset.setLicenseId("https://spdx.org/licenses/Apache-2.0.html");
+        dataset.setRecordStatus(RecordStatus.VALIDATED);
+        dataset.setRawJsonLd("{\"id\":\"https://rec/new\"}");
+        dataset.setValidationIssues("[]");
+        dataset.setSha256("hash123");
+        dataset.setValidatedBy("json-schema");
+        dataset.setValidatedAt("2026-10-11T12:00:00Z");
+
+        String guid = adapter.createOrUpdateDatasetEntity(dataset);
+        assertEquals("new-guid-1", guid);
+    }
+
+    @Test
+    void testCreateOrUpdateDatasetEntityWithUpdatedEntities() {
+        serve(
+                200,
+                "{\"updatedEntities\":[{\"guid\":\"updated-guid-1\",\"typeName\":\"sourcelume_dataset\"}],\"mutatedEntities\":{}}");
+        SourcelumeDatasetDto dataset = new SourcelumeDatasetDto();
+        dataset.setQualifiedName("https://rec/existing");
+        dataset.setName("Existing Dataset");
+
+        String guid = adapter.createOrUpdateDatasetEntity(dataset);
+        assertEquals("updated-guid-1", guid);
+    }
+
+    @Test
+    void testCreateOrUpdateDatasetEntityWithGuidAssignments() {
+        serve(200, "{\"guidAssignments\":{\"-1\":\"assigned-guid-1\"}}");
+        SourcelumeDatasetDto dataset = new SourcelumeDatasetDto();
+        dataset.setQualifiedName("https://rec/assigned");
+        dataset.setName("Assigned Dataset");
+
+        String guid = adapter.createOrUpdateDatasetEntity(dataset);
+        assertEquals("assigned-guid-1", guid);
+    }
+
+    @Test
+    void testCreateOrUpdateDatasetEntityRejectsNull() {
+        assertThrows(IllegalArgumentException.class, () -> adapter.createOrUpdateDatasetEntity(null));
+    }
+
+    @Test
+    void testCreateOrUpdateDatasetEntityThrowsOnServerError() {
+        serve(500, "{\"errorMessage\":\"Server Error\"}");
+        SourcelumeDatasetDto dataset = new SourcelumeDatasetDto();
+        dataset.setQualifiedName("https://rec/error");
+        dataset.setName("Error Dataset");
+
+        assertThrows(AtlasAdapterException.class, () -> adapter.createOrUpdateDatasetEntity(dataset));
+    }
+
+    @Test
+    void testGetDatasetByQualifiedNameFound() {
+        serve(
+                200,
+                "{\"entity\":{\"guid\":\"guid-123\",\"attributes\":{\"qualifiedName\":\"https://rec/1\",\"name\":\"Dataset 1\",\"recordStatus\":\"VALIDATED\"}}}");
+        SourcelumeDatasetDto dto = adapter.getDatasetByQualifiedName("https://rec/1");
+        assertNotNull(dto);
+        assertEquals("guid-123", dto.getGuid());
+        assertEquals("https://rec/1", dto.getQualifiedName());
+        assertEquals("Dataset 1", dto.getName());
+        assertEquals(RecordStatus.VALIDATED, dto.getRecordStatus());
+    }
+
+    @Test
+    void testGetDatasetByQualifiedNameReturnsNullOn404() {
+        serve(404, "{\"errorMessage\":\"Not Found\"}");
+        assertNull(adapter.getDatasetByQualifiedName("https://rec/missing"));
+    }
+
+    @Test
+    void testGetDatasetByQualifiedNameThrowsOnUnknownStatus() {
+        serve(
+                200,
+                "{\"entity\":{\"guid\":\"guid-123\",\"attributes\":{\"qualifiedName\":\"https://rec/1\",\"recordStatus\":\"UNKNOWN_STATUS\"}}}");
+        assertThrows(AtlasAdapterException.class, () -> adapter.getDatasetByQualifiedName("https://rec/1"));
+    }
+
+    @Test
+    void testIsServerReady() {
+        AtomicInteger statusCode = new AtomicInteger(200);
+        server.createContext("/api/atlas/admin/version", exchange -> {
+            byte[] out = "{\"Version\":\"2.3.0\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(statusCode.get(), out.length);
+            exchange.getResponseBody().write(out);
+            exchange.close();
+        });
+
+        assertTrue(adapter.isServerReady());
+
+        statusCode.set(500);
+        assertFalse(adapter.isServerReady());
+
+        server.stop(0);
+        assertFalse(adapter.isServerReady());
+    }
+
+    private void serve(int status, String responseBody) {
+        server.createContext("/", exchange -> {
+            byte[] out = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, out.length);
+            exchange.getResponseBody().write(out);
+            exchange.close();
+        });
+    }
+
+    private SourcelumeAtlasProperties stubProperties(String baseUrl) {
         return new SourcelumeAtlasProperties() {
             @Override
             public String url() {
-                return "http://localhost:21000";
+                return baseUrl;
             }
 
             @Override

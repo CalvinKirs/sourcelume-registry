@@ -96,6 +96,13 @@ class JsonSchemaRecordValidatorTest {
         assertTrue(result.issues().get(0).message().contains("Not valid JSON"));
     }
 
+    @Test
+    void customSchemaResourceThrowsWhenResourceMissing() {
+        assertThrows(
+                org.apache.sourcelume.registry.common.exception.SourcelumeException.class,
+                () -> new JsonSchemaRecordValidator("schemas/nonexistent.schema.json"));
+    }
+
     private static String record(String name) {
         try (InputStream in = JsonSchemaRecordValidatorTest.class.getResourceAsStream("/records/" + name)) {
             if (in == null) {
