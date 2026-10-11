@@ -54,7 +54,7 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code POST /api/atlas/v2/types/typedefs} — create typedefs</li>
  *   <li>{@code PUT  /api/atlas/v2/types/typedefs} — update typedefs (on 409/conflict)</li>
  *   <li>{@code POST /api/atlas/v2/entity/bulk} — create/update a dataset entity</li>
- *   <li>{@code GET  /api/atlas/v2/entity/bulk?typeName=...&attr:qualifiedName=...} — lookup</li>
+ *   <li>{@code GET  /api/atlas/v2/entity/uniqueAttribute/type/{typeName}?attr:qualifiedName=...} — lookup</li>
  * </ul>
  *
  * <p>Atlas-specific JSON shapes live here and only here. The SPI stays
@@ -195,8 +195,8 @@ public class RestAtlasAdapter implements AtlasAdapter {
     public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
         try {
             String q = URLEncoder.encode(qualifiedName, StandardCharsets.UTF_8);
-            String path =
-                    "/api/atlas/v2/entity/bulk?typeName=" + SourcelumeDatasetDto.TYPE_NAME + "&attr:qualifiedName=" + q;
+            String path = "/api/atlas/v2/entity/uniqueAttribute/type/" + SourcelumeDatasetDto.TYPE_NAME
+                    + "?attr:qualifiedName=" + q;
             HttpRequest req = baseRequest("GET", path).GET().build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 404) {
@@ -207,26 +207,60 @@ public class RestAtlasAdapter implements AtlasAdapter {
                         "Failed to fetch dataset entity from Atlas: " + resp.body(), resp.statusCode(), null);
             }
             JsonNode root = objectMapper.readTree(resp.body());
-            JsonNode entities = root.path("entities");
-            if (!entities.isArray() || entities.isEmpty()) {
+            JsonNode entity = root.path("entity");
+            if (entity.isMissingNode() || entity.isNull()) {
                 return null;
             }
-            JsonNode entity = entities.get(0);
-            JsonNode attrs = entity.path("attributes");
-            SourcelumeDatasetDto dto = new SourcelumeDatasetDto();
-            dto.setGuid(entity.path("guid").asText(null));
-            dto.setQualifiedName(attrs.path("qualifiedName").asText(null));
-            dto.setName(attrs.path("name").asText(null));
-            dto.setDescription(attrs.path("description").asText(null));
-            dto.setSourceUri(attrs.path("sourceUri").asText(null));
-            dto.setLicenseId(attrs.path("licenseId").asText(null));
-            return dto;
+            return mapEntityToDto(entity);
         } catch (IOException e) {
             throw new AtlasAdapterException("I/O error fetching entity: " + e.getMessage(), 500, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new AtlasAdapterException("Interrupted fetching entity", 500, e);
         }
+    }
+
+    @Override
+    public SourcelumeDatasetDto getDatasetByGuid(String guid) {
+        if (guid == null || guid.isBlank()) {
+            return null;
+        }
+        try {
+            HttpRequest req = baseRequest("GET", "/api/atlas/v2/entity/guid/" + guid)
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 404) {
+                return null;
+            }
+            if (resp.statusCode() != 200) {
+                throw new AtlasAdapterException(
+                        "Failed to fetch dataset entity from Atlas by GUID: " + resp.body(), resp.statusCode(), null);
+            }
+            JsonNode root = objectMapper.readTree(resp.body());
+            JsonNode entity = root.path("entity");
+            if (entity.isMissingNode() || entity.isNull()) {
+                return null;
+            }
+            return mapEntityToDto(entity);
+        } catch (IOException e) {
+            throw new AtlasAdapterException("I/O error fetching dataset entity by GUID: " + e.getMessage(), 500, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AtlasAdapterException("Interrupted fetching dataset entity by GUID", 500, e);
+        }
+    }
+
+    private SourcelumeDatasetDto mapEntityToDto(JsonNode entity) {
+        JsonNode attrs = entity.path("attributes");
+        SourcelumeDatasetDto dto = new SourcelumeDatasetDto();
+        dto.setGuid(entity.path("guid").asText(null));
+        dto.setQualifiedName(attrs.path("qualifiedName").asText(null));
+        dto.setName(attrs.path("name").asText(null));
+        dto.setDescription(attrs.path("description").asText(null));
+        dto.setSourceUri(attrs.path("sourceUri").asText(null));
+        dto.setLicenseId(attrs.path("licenseId").asText(null));
+        return dto;
     }
 
     // --- helpers ---

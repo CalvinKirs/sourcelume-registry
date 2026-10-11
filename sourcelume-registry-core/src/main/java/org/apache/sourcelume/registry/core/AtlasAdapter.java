@@ -82,6 +82,16 @@ public interface AtlasAdapter {
     SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName);
 
     /**
+     * Retrieves a dataset by its Atlas GUID, or {@code null} if not found.
+     *
+     * @param guid the unique entity GUID to look up
+     * @return the dataset DTO, or null
+     */
+    default SourcelumeDatasetDto getDatasetByGuid(String guid) {
+        return null;
+    }
+
+    /**
      * Backend-neutral holder for a parsed type definition model. The Atlas
      * implementation carries the raw JSON-LD/JSON structure; other backends
      * would carry their own. This keeps the backend wire shape out of the
