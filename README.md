@@ -22,7 +22,7 @@ repo creation, and initial discussion") the codebase is organized as a
 | `sourcelume-registry-typedefs` | Backend type definitions (JSON resources) |
 | `sourcelume-registry-common` | DTOs mapped from `sourcelume-spec`, Jakarta Validation annotations, exceptions, spec resource loader — framework-free (Jakarta API + Jackson only) |
 | `sourcelume-registry-core` | Backend-neutral `AtlasAdapter` SPI (API) — no framework, no backend SDK dependencies |
-| `sourcelume-registry-runtime-quarkus` | Quarkus runtime: thin REST `AtlasAdapter` implementation over the core SPI, startup bootstrap (spec verification + typedef registration), SmallRye Health readiness, Docker packaging |
+| `sourcelume-registry-runtime-quarkus` | Quarkus runtime: dataset and type REST APIs (`/api/v1/datasets`, `/api/v1/types`), thin REST `AtlasAdapter` implementation over the core SPI, startup bootstrap (spec verification + typedef registration), SmallRye Health readiness, Docker packaging |
 
 Runtime modules build on the framework-free core as separate modules and own
 their framework dependencies (the Quarkus BOM is imported in the runtime
@@ -58,10 +58,49 @@ docker compose build
 docker compose up -d
 ```
 
-Readiness (Atlas connectivity) is exposed at
-`http://localhost:8082/q/health/ready`; metrics at `/q/metrics`.
+### Health & Observability
+
+- Readiness (Atlas connectivity): `http://localhost:8082/q/health/ready`
+- Liveness probe: `http://localhost:8082/q/health/live`
+- Prometheus metrics: `http://localhost:8082/q/metrics`
+
 Configuration lives under the `sourcelume.atlas.*` properties
 (`sourcelume-registry-runtime-quarkus/src/main/resources/application.properties`).
+
+### REST API Endpoints
+
+The Quarkus runtime exposes REST endpoints on port `8082`:
+
+#### Datasets (`/api/v1/datasets`)
+
+```bash
+# Create or update a dataset
+curl -s -X POST http://localhost:8082/api/v1/datasets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "qualifiedName": "sourcelume://datasets/demo-1",
+    "name": "Demo Dataset 1",
+    "description": "Demo dataset managed through Sourcelume Registry",
+    "sourceUri": "https://github.com/apache/sourcelume-registry",
+    "licenseId": "Apache-2.0"
+  }' | jq .
+
+# Query by qualifiedName (query parameter)
+curl -s "http://localhost:8082/api/v1/datasets?qualifiedName=sourcelume://datasets/demo-1" | jq .
+
+# Query by internal Atlas GUID
+curl -s "http://localhost:8082/api/v1/datasets/guid/<ASSIGNED_GUID>" | jq .
+```
+
+#### Types & Models (`/api/v1/types`)
+
+```bash
+# Inspect all registered Sourcelume typedefs
+curl -s http://localhost:8082/api/v1/types/typedefs | jq .
+
+# Inspect the sourcelume_dataset entity definition
+curl -s http://localhost:8082/api/v1/types/dataset | jq .
+```
 
 ## Get involved
 
