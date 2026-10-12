@@ -2,7 +2,7 @@
 .venv
 .claude/
 .idea/
-
+.junie/
 target/
 *.class
 

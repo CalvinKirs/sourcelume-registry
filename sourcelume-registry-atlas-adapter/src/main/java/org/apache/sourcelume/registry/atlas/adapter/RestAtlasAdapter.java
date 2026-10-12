@@ -34,7 +34,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.sourcelume.registry.atlas.adapter.config.SourcelumeAtlasProperties;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
@@ -132,22 +134,17 @@ public class RestAtlasAdapter implements AtlasAdapter {
                 return new TypeDefinitionModel(
                         typeDefs.getSourceResource(), resp.body().getBytes(StandardCharsets.UTF_8), count);
             }
-            // Atlas returns 409/conflict when a typedef already exists — fall back to PUT
-            // (update). A 400 is a genuinely malformed request: retrying it as an
-            // update would only mask the original error with the PUT's response.
+            // Atlas returns 409/conflict when one or more typedefs already exist.
+            // When that happens, some types in the payload may be new while others exist.
+            // Atlas PUT fails with 404 if given types that do not exist yet,
+            // and POST fails with 409 if given types that already exist.
+            // We fetch existing typedef headers to split the payload: POST new types first,
+            // then PUT existing types second.
             if (resp.statusCode() == 409) {
-                log.warn("create typedefs failed ({}). Attempting PUT (update)...", resp.statusCode());
-                HttpResponse<String> putResp = sendJson("PUT", "/api/atlas/v2/types/typedefs", body);
-                if (putResp.statusCode() == 200 || putResp.statusCode() == 204) {
-                    log.info("Successfully updated Atlas typedefs");
-                    int count = parseEntityDefCount(putResp.body());
-                    return new TypeDefinitionModel(
-                            typeDefs.getSourceResource(), putResp.body().getBytes(StandardCharsets.UTF_8), count);
-                }
-                throw new AtlasAdapterException(
-                        "Failed to register or update typedefs in Atlas: " + putResp.body(),
-                        putResp.statusCode(),
-                        null);
+                log.warn(
+                        "create typedefs failed ({}). Attempting partitioned registration/update...",
+                        resp.statusCode());
+                return registerOrUpdatePartitioned(typeDefs, body);
             }
             throw new AtlasAdapterException(
                     "Failed to register typedefs in Atlas: " + resp.body(), resp.statusCode(), null);
@@ -157,6 +154,92 @@ public class RestAtlasAdapter implements AtlasAdapter {
             Thread.currentThread().interrupt();
             throw new AtlasAdapterException("Interrupted registering typedefs", 500, e);
         }
+    }
+
+    private TypeDefinitionModel registerOrUpdatePartitioned(TypeDefinitionModel typeDefs, String body)
+            throws IOException, InterruptedException {
+        HttpRequest headersReq =
+                baseRequest("GET", "/api/atlas/v2/types/typedefs/headers").GET().build();
+        HttpResponse<String> headersResp = httpClient.send(headersReq, HttpResponse.BodyHandlers.ofString());
+        if (headersResp.statusCode() != 200) {
+            // If fetching headers fails, try PUT as fallback
+            HttpResponse<String> putResp = sendJson("PUT", "/api/atlas/v2/types/typedefs", body);
+            if (putResp.statusCode() == 200 || putResp.statusCode() == 204) {
+                log.info("Successfully updated Atlas typedefs via fallback PUT");
+                int count = parseEntityDefCount(putResp.body());
+                return new TypeDefinitionModel(
+                        typeDefs.getSourceResource(), putResp.body().getBytes(StandardCharsets.UTF_8), count);
+            }
+            throw new AtlasAdapterException(
+                    "Failed to register or update typedefs in Atlas: " + putResp.body(), putResp.statusCode(), null);
+        }
+
+        Set<String> existingTypeNames = new HashSet<>();
+        JsonNode headersArray = objectMapper.readTree(headersResp.body());
+        if (headersArray.isArray()) {
+            for (JsonNode header : headersArray) {
+                JsonNode nameNode = header.path("name");
+                if (nameNode.isTextual()) {
+                    existingTypeNames.add(nameNode.asText());
+                }
+            }
+        }
+
+        JsonNode root = objectMapper.readTree(body);
+        ObjectNode newDefs = objectMapper.createObjectNode();
+        ObjectNode existingDefs = objectMapper.createObjectNode();
+        int newCount = 0;
+        int existingCount = 0;
+
+        String[] categories = new String[] {
+            "enumDefs", "structDefs", "classificationDefs", "entityDefs", "relationshipDefs", "businessMetadataDefs"
+        };
+
+        for (String category : categories) {
+            JsonNode defs = root.path(category);
+            if (defs.isArray()) {
+                ArrayNode newArray = newDefs.putArray(category);
+                ArrayNode existingArray = existingDefs.putArray(category);
+                for (JsonNode def : defs) {
+                    String name = def.path("name").asText(null);
+                    if (name != null && existingTypeNames.contains(name)) {
+                        existingArray.add(def);
+                        existingCount++;
+                    } else {
+                        newArray.add(def);
+                        newCount++;
+                    }
+                }
+            }
+        }
+
+        String lastResponseBody = null;
+        if (newCount > 0) {
+            String newBody = objectMapper.writeValueAsString(newDefs);
+            HttpResponse<String> postResp = sendJson("POST", "/api/atlas/v2/types/typedefs", newBody);
+            if (postResp.statusCode() != 200 && postResp.statusCode() != 201) {
+                throw new AtlasAdapterException(
+                        "Failed to register new typedefs in Atlas: " + postResp.body(), postResp.statusCode(), null);
+            }
+            log.info("Successfully registered {} new type definitions", newCount);
+            lastResponseBody = postResp.body();
+        }
+
+        if (existingCount > 0) {
+            String existingBody = objectMapper.writeValueAsString(existingDefs);
+            HttpResponse<String> putResp = sendJson("PUT", "/api/atlas/v2/types/typedefs", existingBody);
+            if (putResp.statusCode() != 200 && putResp.statusCode() != 204) {
+                throw new AtlasAdapterException(
+                        "Failed to update existing typedefs in Atlas: " + putResp.body(), putResp.statusCode(), null);
+            }
+            log.info("Successfully updated {} existing type definitions", existingCount);
+            lastResponseBody = putResp.body();
+        }
+
+        int count = parseEntityDefCount(body);
+        byte[] responseBytes =
+                lastResponseBody != null ? lastResponseBody.getBytes(StandardCharsets.UTF_8) : typeDefs.getRawJson();
+        return new TypeDefinitionModel(typeDefs.getSourceResource(), responseBytes, count);
     }
 
     @Override

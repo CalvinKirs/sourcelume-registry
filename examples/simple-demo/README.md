@@ -1,26 +1,30 @@
 # Apache Sourcelume Simple Demo
 **Community Over Code Glasgow 2026 Hackathon**
 
-This demo provides a hands-on walkthrough of **Apache Sourcelume Spec** and **Apache Sourcelume Registry** working together with **Apache Atlas** to persist, index, and query dataset metadata and provenance records.
+This demo provides a comprehensive hands-on walkthrough of **Apache Sourcelume Spec** and **Apache Sourcelume Registry** working together with **Apache Atlas** to validate, ingest, index, curate, and govern dataset provenance metadata.
 
 ---
 
 ## What This Demo Demonstrates
 
 ### The Problem
-AI models are often trained on large-scale datasets with murky origins, untracked licensing constraints, and missing audit trails. Without standardized provenance, organizations risk intellectual property infringement, non-compliance with open source licenses (e.g. SPDX), and untraceable data contamination.
+AI models and data pipelines often train on large-scale datasets with murky origins, untracked licensing constraints, missing audit trails, and unverifiable custody chains. Without standardized, enforceable provenance:
+- Organizations face severe intellectual property and legal compliance liabilities.
+- Data curators lack structured feedback mechanisms when receiving partial or flawed metadata.
+- Data governance teams cannot guarantee that published provenance records remain tamper-resistant and byte-accurate over time.
 
 ### The Sourcelume Solution
 1. **Spec (`sourcelume-spec`)**: A standardized JSON-LD / SHACL provenance specification defining data structures for dataset identification, custody chains, actor attestations, and SPDX licensing history.
-2. **Registry (`sourcelume-registry`)**: A cloud-native metadata registry service that validates dataset records against spec schemas, automatically bootstraps domain type definitions into **Apache Atlas**, and provides REST APIs for dataset registration and query resolution.
+2. **Registry (`sourcelume-registry`)**: A cloud-native Quarkus metadata registry service that validates records against spec schemas, automatically bootstraps domain type definitions into **Apache Atlas**, enforces byte-level SHA-256 auditing, manages curatable ingestion lifecycles, and guarantees provenance immutability.
 
 ### The Story You Present
-Within seconds, an operator or CI pipeline can:
-1. Verify system readiness and Atlas backend connectivity.
-2. Observe zero-configuration bootstrapping of Sourcelume's custom type system (`sourcelume_dataset`) into Apache Atlas.
-3. Ingest dataset provenance metadata (curated during the Glasgow Hackathon) with automated validation.
-4. Query the dataset by both canonical domain URI (`qualifiedName`) and internal graph GUID.
-5. Visually explore the dataset entity, attributes, and audit history in the Apache Atlas Web UI.
+Within minutes, an operator, data curator, or CI pipeline can:
+1. **Verify Readiness**: Confirm registry health and live connectivity to Apache Atlas.
+2. **Observe Zero-Config Type Bootstrapping**: Inspect automatic synchronization of custom entity types (`sourcelume_dataset`) and status enums (`sourcelume_record_status`) into Apache Atlas.
+3. **Execute Pre-Flight Validation**: Test multi-stage in-memory validation (JSON Schema draft 2020-12 followed by Apache Jena SHACL) with fast structured error reporting before touching storage.
+4. **Experience the Curatable Ingestion Lifecycle**: Ingest an incomplete draft record, inspect recorded validation issues, and resubmit the corrected record with automatic in-place promotion from `INCOMPLETE` to `VALIDATED`.
+5. **Verify Immutability & Tamper Protection**: Observe how attempts to overwrite a published/validated record are rejected with `409 Conflict`.
+6. **Query & Explore Lineage**: Query metadata through multiple interfaces (canonical spec IRI, dataset URI, and Atlas GUID) and inspect the entity graph in the Apache Atlas Web UI.
 
 ---
 
@@ -28,9 +32,10 @@ Within seconds, an operator or CI pipeline can:
 
 | File | Description |
 |---|---|
-| `run-demo.sh` | Automated end-to-end demo script with clear narration, formatted console output, and step-by-step verification. |
-| `sample-dataset.json` | Sample dataset payload mapped to `SourcelumeDatasetDto` for registry ingestion. |
-| `sample-provenance-record.jsonld` | Spec-compliant JSON-LD provenance card showing full metadata, custody chain, and SPDX licensing. |
+| `run-demo.sh` | Automated end-to-end demo script with ASCII diagrams, formatted console output, and step-by-step verification. |
+| `sample-incomplete-record.jsonld` | Sample JSON-LD provenance card missing required license metadata (triggers validation rejection & `INCOMPLETE` state). |
+| `sample-provenance-record.jsonld` | Fully conforming Spec-compliant JSON-LD provenance card with custody chain, actor attestations, and SPDX licensing. |
+| `sample-dataset.json` | Sample dataset payload mapped to `SourcelumeDatasetDto` for direct dataset endpoint operations. |
 | `README.md` | This guided walkthrough and reference documentation. |
 
 ---
@@ -49,7 +54,7 @@ Before running the demo, ensure you have:
 
 ### 1. Start the Environment
 
-Make sure Apache Atlas and the Sourcelume Registry runtime are running:
+Ensure Apache Atlas and the Sourcelume Registry runtime are running:
 
 ```bash
 # Terminal 1: Start Apache Atlas backend (from project root)
@@ -75,7 +80,27 @@ cd examples/simple-demo
 
 ## What `run-demo.sh` Executes (Step-by-Step Breakdown)
 
-The automated script walks through 5 verification stages:
+The automated script walks through 6 verification stages:
+
+```text
+                                  Apache Sourcelume Demo Workflow
+  +-----------------------------------------------------------------------------------------------+
+  |                                                                                               |
+  |  [Step 1] Health Probe -------------> [Step 2] Bootstrap Typedefs                             |
+  |     • GET /q/health/ready                • Auto-sync sourcelume_dataset & enum                |
+  |                                                                                               |
+  |  [Step 3] Pre-Flight Check ---------> [Step 4] Ingest & Curation Lifecycle                    |
+  |     • POST /records/validate             • POST draft (INCOMPLETE) -> Query -> POST fix       |
+  |     • Fail-fast JSON Schema + SHACL      • Byte-level SHA-256 + State promotion (VALIDATED)   |
+  |                                                                                               |
+  |  [Step 5] Immutability Gate --------> [Step 6] Unified Query & Atlas Graph                    |
+  |     • Re-POST VALIDATED record           • Dual query: /records/{id} vs /api/v1/datasets      |
+  |     • 409 Conflict Protection            • Atlas Web UI Inspection (http://localhost:21000)   |
+  |                                                                                               |
+  +-----------------------------------------------------------------------------------------------+
+```
+
+---
 
 ### Step 1: System Readiness & Health Probe (`/q/health/ready`)
 - **What it does**: Issues a SmallRye Health check against the Quarkus registry runtime.
@@ -102,31 +127,25 @@ The automated script walks through 5 verification stages:
 curl -s http://localhost:8082/q/health/ready | jq .
 ```
 
+---
+
 ### Step 2: Automatic Atlas Type Bootstrapping (`/api/v1/types/typedefs`)
-- **What it does**: Queries the registry to inspect active entity type definitions in Apache Atlas.
-- **What you are showing**: Zero manual Atlas configuration required. On startup, Sourcelume automatically registered the `sourcelume_dataset` type (derived from `sourcelume_model.json`), extending Atlas's native `DataSet` type hierarchy with attributes like `sourceUri` and `licenseId`.
+- **What it does**: Queries the registry to inspect active entity and enum type definitions in Apache Atlas.
+- **What you are showing**: Zero manual Atlas configuration required. On startup, Sourcelume reads `models/sourcelume/sourcelume_model.json`, performs conflict-aware partitioned synchronization, and registers the `sourcelume_dataset` entity type and `sourcelume_record_status` enum type into Atlas.
 
 ```text
-  +----------------------+             +----------------------------------+             +-------------------------+
-  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
-  +----------------------+             +----------------------------------+             +-------------------------+
-             |                                          |                                            |
-             |                                          |  [On Startup: Auto-Bootstrap Typedefs]     |
-             |                                          |  1. Read model (sourcelume_model.json)     |
-             |                                          |  2. POST /api/atlas/v2/types/typedefs      |
-             |                                          | -----------------------------------------> |
-             |                                          |     Register sourcelume_dataset type       |
-             |                                          |                                            |
-             |  3. GET /api/v1/types/typedefs           |                                            |
-             | ---------------------------------------> |                                            |
-             |                                          |  4. Fetch registered type definitions      |
-             |                                          | -----------------------------------------> |
-             |                                          |                                            |
-             |                                          |  5. Return Atlas entity & struct defs      |
-             |                                          | <----------------------------------------- |
-             |  6. Return active Typedef JSON           |                                            |
-             | <--------------------------------------- |                                            |
-             |                                          |                                            |
+  +--------------------------------+       +----------------------------------+       +-------------------------+
+  |   Sourcelume Spec Models       |       |   Sourcelume Registry (Quarkus)  |       |      Apache Atlas       |
+  +--------------------------------+       +----------------------------------+       +-------------------------+
+                  |                                         |                                      |
+                  |  1. Load models/sourcelume_model.json   |                                      |
+                  | --------------------------------------> |                                      |
+                  |                                         |  2. Check existing / conflict sync   |
+                  |                                         |  3. Register entity & enum typedefs  |
+                  |                                         | -----------------------------------> |
+                  |                                         |     - sourcelume_dataset (entity)    |
+                  |                                         |     - sourcelume_record_status (enum)|
+                  |                                         |                                      |
 ```
 
 ```bash
@@ -137,87 +156,157 @@ curl -s http://localhost:8082/api/v1/types/typedefs | jq .
 curl -s http://localhost:8082/api/v1/types/dataset | jq .
 ```
 
-### Step 3: Dataset Registration & Ingestion (`POST /api/v1/datasets`)
-- **What it does**: Ingests `sample-dataset.json` (representing the Glasgow Hackathon dataset) into the registry.
+---
+
+### Step 3: Pre-Flight Specification Validation (`POST /records/validate`)
+- **What it does**: Runs a two-stage in-memory validation chain over submitted JSON-LD documents without making any database writes or touching Apache Atlas:
+  1. **Stage 1 (JSON Schema)**: Validates structural syntax against Draft 2020-12 schema using NetworkNT with date-time and URI format assertions.
+  2. **Stage 2 (SHACL Graph)**: Validates semantic graph shapes against W3C SHACL definitions using Apache Jena and Titanium JSON-LD.
 - **What you are showing**:
-  - The registry validates input fields against Jakarta Validation rules and spec definitions (`qualifiedName`, `licenseId`, `sourceUri`).
-  - It creates the entity inside Apache Atlas and returns a newly minted Atlas internal `guid` alongside its domain URI.
+  - Non-conforming records immediately return `422 Unprocessable Entity` with exact violation paths and error descriptions.
+  - Conforming records return `200 OK` (`{"conforms": true, "issues": []}`).
 
 ```text
-  +----------------------+             +----------------------------------+             +-------------------------+
-  |    Client / CI       |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
-  +----------------------+             +----------------------------------+             +-------------------------+
-             |                                          |                                            |
-             |  1. POST /api/v1/datasets                |                                            |
-             |     (Payload: qualifiedName, etc.)       |                                            |
-             | ---------------------------------------> |                                            |
-             |                                          |  2. Validate DTO (Jakarta Validation)      |
-             |                                          |  3. Map DTO -> sourcelume_dataset Entity   |
-             |                                          | -----------------------------------------> |
-             |                                          |     Persist entity into Atlas graph        |
-             |                                          |                                            |
-             |                                          |  4. Assigned Graph GUID & Indexed          |
-             |                                          | <----------------------------------------- |
-             |  5. Return DTO with assigned GUID        |                                            |
-             | <--------------------------------------- |                                            |
-             |                                          |                                            |
+       +-----------------------------------------------------------------------------------+
+       |                       Sourcelume In-Memory Validator Chain                        |
+       +-----------------------------------------------------------------------------------+
+                                                 |
+  +----------------+    Raw JSON-LD    +-------------------+    Clean Syntax   +-------------------+
+  |  Client / CI   | ----------------> | Stage 1:          | ----------------> | Stage 2:          |
+  |  Pre-Flight    |                   | JSON Schema       |                   | SHACL Graph       |
+  +----------------+                   | (Draft 2020-12)   |                   | (Apache Jena)     |
+          ^                            +-------------------+                   +-------------------+
+          |                                      | Fail (422)                            | Pass (200) / Fail (422)
+          +--------------------------------------+---------------------------------------+
+                              ValidationResult (conforms + structured issues)
 ```
 
 ```bash
-curl -s -X POST http://localhost:8082/api/v1/datasets \
+# 3a. Pre-flight check on non-conforming record (missing license) -> 422 Unprocessable Entity
+curl -s -X POST http://localhost:8082/records/validate \
   -H "Content-Type: application/json" \
-  -d @sample-dataset.json | jq .
+  -d @sample-incomplete-record.jsonld | jq .
+
+# 3b. Pre-flight check on conforming record -> 200 OK
+curl -s -X POST http://localhost:8082/records/validate \
+  -H "Content-Type: application/json" \
+  -d @sample-provenance-record.jsonld | jq .
 ```
 
-### Step 4: Domain-Key Query (`GET /api/v1/datasets?qualifiedName=...`)
-- **What it does**: Queries the dataset using its canonical URI identifier (`sourcelume://datasets/glasgow-hackathon-corpus-v1`).
-- **What you are showing**: Upstream ML pipelines, curators, and compliance tools can retrieve dataset metadata using meaningful domain URIs without needing to know internal database identifiers.
+---
+
+### Step 4: Synchronous Ingestion & Curation Lifecycle (`POST /records`)
+- **What it does**: Executes the full synchronous ingest pipeline and demonstrates the real-world data curation lifecycle:
+  1. **Byte-Accurate Digesting**: Calculates a raw `sha256` hash over the request body before decoding, providing tamper-evident provenance tracking.
+  2. **Incomplete Record Persistence**: Submitting a draft record with missing metadata persists it with status `INCOMPLETE` (`201 Created`), capturing its exact validation issues so curators can inspect what needs resolution.
+  3. **In-Place State Promotion**: Submitting the corrected record under the same canonical identifier (`id`) re-evaluates the validator chain, updates the entity in Apache Atlas, clears validation issues, promotes `recordStatus` to `VALIDATED`, and returns `200 OK`.
 
 ```text
-  +----------------------+             +----------------------------------+             +-------------------------+
-  |  ML Pipeline / Tool  |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
-  +----------------------+             +----------------------------------+             +-------------------------+
-             |                                          |                                            |
-             |  1. GET /api/v1/datasets                 |                                            |
-             |     ?qualifiedName=sourcelume://...      |                                            |
-             | ---------------------------------------> |                                            |
-             |                                          |  2. Query Atlas by unique qualifiedName    |
-             |                                          | -----------------------------------------> |
-             |                                          |                                            |
-             |                                          |  3. Return matched Entity data             |
-             |                                          | <----------------------------------------- |
-             |  4. Return JSON dataset attributes       |                                            |
-             | <--------------------------------------- |                                            |
-             |                                          |                                            |
+  +-------------------------------------------------------------------------------------------------+
+  |                             Curatable Ingestion State Machine                                   |
+  +-------------------------------------------------------------------------------------------------+
+                                                  |
+  +---------------------+   POST Incomplete   +---------------------+   Inspect Issues   +---------+
+  | 1. Draft Submission | ------------------> | Persisted Entity    | -----------------> | Review  |
+  |    (Missing License)|                     | Status: INCOMPLETE  |  GET /records/id   | Issues  |
+  +---------------------+                     | HTTP 201 Created    |                    +---------+
+                                              +---------------------+                         |
+                                                         |                                    |
+  +---------------------+   POST Corrected Record        | Fix Missing Metadata               |
+  | 2. Resubmission     | -------------------------------+------------------------------------+
+  |    (Valid Spec)     |                                v
+  +---------------------+                     +---------------------+
+                                              | Updated Entity      |
+                                              | Status: VALIDATED   |
+                                              | HTTP 200 OK         |
+                                              +---------------------+
 ```
 
 ```bash
-curl -s "http://localhost:8082/api/v1/datasets?qualifiedName=sourcelume://datasets/glasgow-hackathon-corpus-v1" | jq .
+# 4a. Ingest initial draft record -> 201 Created (Status: INCOMPLETE)
+curl -s -X POST http://localhost:8082/records \
+  -H "Content-Type: application/json" \
+  -d @sample-incomplete-record.jsonld | jq .
+
+# 4b. Inspect stored record status and issues
+RECORD_ID="https://sourcelume.apache.org/records/rec-glasgow-hackathon-001"
+ENCODED_ID=$(jq -rn --arg x "${RECORD_ID}" '$x|@uri')
+curl -s "http://localhost:8082/records/${ENCODED_ID}" | jq .
+
+# 4c. Resubmit corrected record under same ID -> 200 OK (Status: VALIDATED)
+curl -s -X POST http://localhost:8082/records \
+  -H "Content-Type: application/json" \
+  -d @sample-provenance-record.jsonld | jq .
 ```
 
-### Step 5: Backend-Key Query (`GET /api/v1/datasets/guid/...`)
-- **What it does**: Queries the dataset using its internal Atlas GUID (`ASSIGNED_GUID`).
-- **What you are showing**: Downstream governance tools and Atlas-native services have direct access to entities via their persistent graph GUIDs.
+---
+
+### Step 5: Immutability & Tamper Protection (`409 Conflict`)
+- **What it does**: Enforces strict governance invariants on published provenance data.
+- **What you are showing**: Once a record achieves `VALIDATED` status, subsequent attempts to POST modifications to that identifier are strictly rejected with `409 Conflict`. Published datasets cannot have their licensing history, origin, or custody chain silently mutated.
 
 ```text
   +----------------------+             +----------------------------------+             +-------------------------+
-  |  Governance / Audit  |             |   Sourcelume Registry (Quarkus)  |             |      Apache Atlas       |
+  |  Mutate / Overwrite  |             |   Sourcelume Ingest Pipeline     |             |      Apache Atlas       |
   +----------------------+             +----------------------------------+             +-------------------------+
              |                                          |                                            |
-             |  1. GET /api/v1/datasets/guid/{guid}     |                                            |
+             |  1. POST /records (Existing ID)          |                                            |
              | ---------------------------------------> |                                            |
-             |                                          |  2. Direct Graph node lookup by Atlas GUID |
-             |                                          | -----------------------------------------> |
+             |                                          |  2. Check existing recordStatus            |
+             |                                          |     Found: VALIDATED (Published)           |
              |                                          |                                            |
-             |                                          |  3. Return Entity graph node attributes    |
-             |                                          | <----------------------------------------- |
-             |  4. Return JSON dataset attributes       |                                            |
+             |  3. HTTP 409 Conflict                    |  [Rejected: Modification Forbidden]        |
              | <--------------------------------------- |                                            |
-             |                                          |                                            |
+             |     {"recordStatus": "VALIDATED"}        |                                            |
 ```
 
 ```bash
-curl -s "http://localhost:8082/api/v1/datasets/guid/<ASSIGNED_GUID>" | jq .
+# Attempting to re-ingest or mutate an already VALIDATED record returns 409 Conflict
+curl -s -i -X POST http://localhost:8082/records \
+  -H "Content-Type: application/json" \
+  -d @sample-provenance-record.jsonld
+```
+
+---
+
+### Step 6: Unified Query Resolution & Apache Atlas Lineage Exploration
+- **What it does**: Demonstrates multi-path entity resolution and backend integration.
+- **What you are showing**: Consumers, downstream training scripts, and compliance auditors can query the entity using:
+  1. **Canonical Spec Record IRI** (`GET /records/{encodedId}`)
+  2. **Dataset Domain URI** (`GET /api/v1/datasets?qualifiedName=...`)
+  3. **Internal Atlas Graph GUID** (`GET /api/v1/datasets/guid/{guid}`)
+
+```text
+                               +--------------------------------------------+
+                               |     Unified Metadata Resolution Paths      |
+                               +--------------------------------------------+
+                                                     |
+             +---------------------------------------+---------------------------------------+
+             |                                       |                                       |
+             v                                       v                                       v
+  [1. Canonical Record IRI]              [2. Dataset URI Query]                 [3. Atlas Graph GUID]
+   GET /records/{encodedId}               GET /api/v1/datasets?qualifiedName=    GET /api/v1/datasets/guid/{guid}
+             |                                       |                                       |
+             +---------------------------------------+---------------------------------------+
+                                                     |
+                                                     v
+                                     +-------------------------------+
+                                     | Apache Atlas Governed Entity  |
+                                     | - Type: sourcelume_dataset    |
+                                     | - Status: VALIDATED           |
+                                     | - SHA-256 Digest & Audit Log  |
+                                     +-------------------------------+
+```
+
+```bash
+# 6a. Query via Canonical Record Endpoint
+curl -s "http://localhost:8082/records/${ENCODED_ID}" | jq .
+
+# 6b. Query via Dataset Qualified Name
+curl -s "http://localhost:8082/api/v1/datasets?qualifiedName=${ENCODED_ID}" | jq .
+
+# 6c. Query via Atlas Graph GUID (using guid returned in 6b)
+# curl -s "http://localhost:8082/api/v1/datasets/guid/<ASSIGNED_GUID>" | jq .
 ```
 
 ---
@@ -227,21 +316,30 @@ curl -s "http://localhost:8082/api/v1/datasets/guid/<ASSIGNED_GUID>" | jq .
 To conclude the demo with visual verification:
 
 1. Open your browser to [http://localhost:21000](http://localhost:21000).
-2. Log in with:
+2. Log in with credentials:
    - **Username**: `admin`
    - **Password**: `atlasR0cks!`
 3. In the search box, select **Type**: `sourcelume_dataset`.
-4. Click **Search** to view the `Glasgow Hackathon Instruction Corpus v1` entity, its indexed attributes (`sourceUri`, `licenseId`), and audit history.
+4. Click **Search** to view the `Glasgow Hackathon Instruction Corpus v1` entity.
+5. Inspect the entity attributes:
+   - `name`: `Glasgow Hackathon Instruction Corpus v1`
+   - `recordStatus`: `VALIDATED`
+   - `licenseId`: `https://spdx.org/licenses/Apache-2.0.html`
+   - `sourceUri`: `sourcelume://datasets/glasgow-hackathon-corpus-v1`
+   - `sha256`: Cryptographic digest of submitted JSON-LD payload
+   - `validatedBy`: `json-schema,shacl`
+   - `validatedAt`: ISO-8601 UTC timestamp
+   - **Audit History**: Complete timeline showing entity creation, status updates, and property changes.
 
 ---
 
-## Companion Artifact: The Spec Provenance Record
+## Companion Artifact: Spec Provenance Record
 
-The `sample-provenance-record.jsonld` file illustrates the broader **Sourcelume Spec (v0.0.1)** model and linked-data format:
+The `sample-provenance-record.jsonld` file illustrates the complete **Sourcelume Spec (v0.0.1)** linked data model:
 
-- **Custody Chain (`custodyChain`)**: Tracking who touched the dataset (`agent`), what operation was performed (`action`), and when (`startTime`).
-- **License Governance (`licenseHistory`)**: Tracking SPDX license attribution (`Apache-2.0`) and compatibility verification.
-- **JSON-LD Interoperability**: Demonstrating compliance with standard W3C linked data formats.
+- **Custody Chain (`custodyChain`)**: Tracking who created, transformed, or reviewed the dataset (`agent`), what operation was performed (`action`), and when (`startTime`).
+- **License Governance (`licenseHistory`)**: Tracking SPDX license attribution (`Apache-2.0`), scope, and compatibility verification.
+- **JSON-LD Interoperability**: Fully interoperable with standard W3C linked data graphs.
 
 ```json
 {
@@ -253,13 +351,12 @@ The `sample-provenance-record.jsonld` file illustrates the broader **Sourcelume 
   "version": "1.0.0",
   "license": "https://spdx.org/licenses/Apache-2.0.html",
   "licenseScope": "dataset",
-  "licenseCategory": "permissive",
+  "licenseCategory": "open-source",
   "licenseNote": "SPDX compliant Apache-2.0 dataset metadata verification",
   "licenseHistory": [
     {
-      "license": "https://spdx.org/licenses/Apache-2.0.html",
-      "event": "initial_curation",
-      "date": "2026-10-11T09:00:00Z"
+      "iri": "https://spdx.org/licenses/Apache-2.0.html",
+      "effectiveDate": "2026-10-11T09:00:00Z"
     }
   ],
   "creator": [

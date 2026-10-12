@@ -96,6 +96,23 @@ class ProvenanceRecordMapperTest {
         assertEquals(record.getIdentifier(), entity.getSourceUri());
     }
 
+    @Test
+    void mapRejectsNullOrBlank() {
+        assertThrows(IllegalArgumentException.class, () -> ProvenanceRecordMapper.map(null));
+        assertThrows(IllegalArgumentException.class, () -> ProvenanceRecordMapper.map("   "));
+    }
+
+    @Test
+    void extractRecordIdRejectsNullOrBlank() {
+        assertThrows(IllegalArgumentException.class, () -> ProvenanceRecordMapper.extractRecordId(null));
+        assertThrows(IllegalArgumentException.class, () -> ProvenanceRecordMapper.extractRecordId("   "));
+    }
+
+    @Test
+    void toDatasetEntityRejectsNull() {
+        assertThrows(IllegalArgumentException.class, () -> ProvenanceRecordMapper.toDatasetEntity(null));
+    }
+
     private String readFixture(String resource) throws IOException {
         try (InputStream in = getClass().getResourceAsStream(resource)) {
             assertNotNull(in, "fixture not found: " + resource);

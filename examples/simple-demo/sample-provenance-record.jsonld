@@ -7,13 +7,12 @@
   "version": "1.0.0",
   "license": "https://spdx.org/licenses/Apache-2.0.html",
   "licenseScope": "dataset",
-  "licenseCategory": "permissive",
+  "licenseCategory": "open-source",
   "licenseNote": "SPDX compliant Apache-2.0 dataset metadata verification",
   "licenseHistory": [
     {
-      "license": "https://spdx.org/licenses/Apache-2.0.html",
-      "event": "initial_curation",
-      "date": "2026-10-11T09:00:00Z"
+      "iri": "https://spdx.org/licenses/Apache-2.0.html",
+      "effectiveDate": "2026-10-11T09:00:00Z"
     }
   ],
   "creator": [
