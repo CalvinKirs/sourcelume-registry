@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+import java.util.function.Consumer;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
@@ -120,9 +121,62 @@ class DatasetResourceUnitTest {
         assertEquals(Response.Status.CREATED.getStatusCode(), rOk.getStatus());
     }
 
+    @Test
+    void testCreateOrUpdateDatasetRejectsEachVerdictField() {
+        List<Consumer<SourcelumeDatasetDto>> verdictFields = List.of(
+                d -> d.setRecordStatus(RecordStatus.VALIDATED),
+                d -> d.setRawJsonLd("{}"),
+                d -> d.setValidationIssues("[]"),
+                d -> d.setSha256("abc"),
+                d -> d.setValidatedBy("json-schema,shacl"),
+                d -> d.setValidatedAt("2026-10-15T00:00:00Z"));
+
+        for (Consumer<SourcelumeDatasetDto> verdictField : verdictFields) {
+            SourcelumeDatasetDto dataset = plainDataset("sourcelume://datasets/test");
+            verdictField.accept(dataset);
+
+            Response response = resource.createOrUpdateDataset(dataset);
+
+            assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+        }
+        assertEquals(0, adapter.writes);
+    }
+
+    @Test
+    void testCreateOrUpdateDatasetRefusesToOverwriteProvenanceRecords() {
+        for (RecordStatus status : RecordStatus.values()) {
+            SourcelumeDatasetDto record = plainDataset("https://example.org/records/r1");
+            record.setRecordStatus(status);
+            adapter.datasetByQName = record;
+
+            Response response = resource.createOrUpdateDataset(plainDataset("https://example.org/records/r1"));
+
+            assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
+        }
+        assertEquals(0, adapter.writes);
+    }
+
+    @Test
+    void testCreateOrUpdateDatasetUpdatesExistingPlainDataset() {
+        adapter.datasetByQName = plainDataset("sourcelume://datasets/test");
+
+        Response response = resource.createOrUpdateDataset(plainDataset("sourcelume://datasets/test"));
+
+        assertEquals(Response.Status.CREATED.getStatusCode(), response.getStatus());
+        assertEquals(1, adapter.writes);
+    }
+
+    private static SourcelumeDatasetDto plainDataset(String qualifiedName) {
+        SourcelumeDatasetDto dataset = new SourcelumeDatasetDto();
+        dataset.setQualifiedName(qualifiedName);
+        dataset.setName("Test");
+        return dataset;
+    }
+
     private static class StubAtlasAdapter implements AtlasAdapter {
         SourcelumeDatasetDto datasetByQName;
         SourcelumeDatasetDto datasetByGuid;
+        int writes;
 
         @Override
         public boolean isServerReady() {
@@ -141,6 +195,7 @@ class DatasetResourceUnitTest {
 
         @Override
         public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
+            writes++;
             return "guid-created";
         }
 
