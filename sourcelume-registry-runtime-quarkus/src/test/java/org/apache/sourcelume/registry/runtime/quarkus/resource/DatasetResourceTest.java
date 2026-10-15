@@ -22,11 +22,17 @@ import static org.hamcrest.Matchers.notNullValue;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
+import jakarta.inject.Inject;
+import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.junit.jupiter.api.Test;
 
 @QuarkusTest
 class DatasetResourceTest {
+
+    @Inject
+    AtlasAdapter atlasAdapter;
 
     @Test
     void shouldCreateAndFetchDataset() {
@@ -98,6 +104,46 @@ class DatasetResourceTest {
                 .statusCode(404);
 
         given().when().get("/api/v1/datasets/guid/invalid-guid").then().statusCode(404);
+    }
+
+    @Test
+    void shouldNotAllowValidatedRecordToBeOverwritten() {
+        String recordId = "https://example.org/records/locked-record";
+        SourcelumeDatasetDto record = new SourcelumeDatasetDto();
+        record.setQualifiedName(recordId);
+        record.setName("Locked record");
+        record.setLicenseId("https://spdx.org/licenses/Apache-2.0.html");
+        record.setRecordStatus(RecordStatus.VALIDATED);
+        atlasAdapter.createOrUpdateDatasetEntity(record);
+
+        // 1. Forged verdict
+        given().contentType(ContentType.JSON)
+                .body("{\"qualifiedName\": \"" + recordId + "\", \"name\": \"tampered\","
+                        + " \"licenseId\": \"https://spdx.org/licenses/GPL-3.0.html\","
+                        + " \"recordStatus\": \"VALIDATED\"}")
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(400);
+
+        // 2. Overwrite without a verdict
+        given().contentType(ContentType.JSON)
+                .body("{\"qualifiedName\": \"" + recordId + "\", \"name\": \"tampered\","
+                        + " \"licenseId\": \"https://spdx.org/licenses/GPL-3.0.html\"}")
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(409);
+
+        // 3. Record is unchanged
+        given().queryParam("qualifiedName", recordId)
+                .when()
+                .get("/api/v1/datasets")
+                .then()
+                .statusCode(200)
+                .body("name", equalTo("Locked record"))
+                .body("licenseId", equalTo("https://spdx.org/licenses/Apache-2.0.html"))
+                .body("recordStatus", equalTo("VALIDATED"));
     }
 
     @Test

@@ -60,10 +60,11 @@ public class DatasetResource {
     }
 
     /**
-     * Creates or updates a Sourcelume dataset entity.
+     * Creates or updates a Sourcelume dataset entity. Provenance records are managed via {@code POST /records}.
      *
      * @param dataset the dataset DTO to persist
-     * @return 201 Created with the persisted dataset DTO including assigned GUID, or 400 Bad Request
+     * @return 201 Created with the persisted dataset DTO including assigned GUID, 400 Bad Request, or
+     *     409 Conflict if the qualifiedName is a provenance record
      */
     @POST
     public Response createOrUpdateDataset(SourcelumeDatasetDto dataset) {
@@ -82,11 +83,32 @@ public class DatasetResource {
                     .entity(Map.of("error", "name is required"))
                     .build();
         }
+        // Verdict fields are only ever set by the validator chain in POST /records
+        if (carriesVerdictFields(dataset)) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Verdict fields are set by the registry; use POST /records"))
+                    .build();
+        }
+        SourcelumeDatasetDto existing = atlasAdapter.getDatasetByQualifiedName(dataset.getQualifiedName());
+        if (existing != null && existing.getRecordStatus() != null) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "Provenance record can only be changed via POST /records"))
+                    .build();
+        }
 
         String guid = atlasAdapter.createOrUpdateDatasetEntity(dataset);
         dataset.setGuid(guid);
         log.info("Persisted dataset entity '{}' (GUID: {})", dataset.getQualifiedName(), guid);
         return Response.status(Response.Status.CREATED).entity(dataset).build();
+    }
+
+    private static boolean carriesVerdictFields(SourcelumeDatasetDto dataset) {
+        return dataset.getRecordStatus() != null
+                || dataset.getRawJsonLd() != null
+                || dataset.getValidationIssues() != null
+                || dataset.getSha256() != null
+                || dataset.getValidatedBy() != null
+                || dataset.getValidatedAt() != null;
     }
 
     /**
