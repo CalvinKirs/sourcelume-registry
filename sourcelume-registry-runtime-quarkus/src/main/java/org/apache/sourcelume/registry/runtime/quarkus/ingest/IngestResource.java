@@ -38,6 +38,15 @@ import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.ingest.IngestResult;
 import org.apache.sourcelume.registry.core.ingest.IngestService;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.headers.Header;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 /**
  * Ingest endpoints. {@code POST /records} validates a submitted record
@@ -57,6 +66,7 @@ import org.apache.sourcelume.registry.core.validation.ValidationResult;
  * on GET is {@code 404}.
  */
 @Path("/records")
+@Tag(name = "Records", description = "Submit provenance records and read their verdicts")
 public class IngestResource {
 
     private final AtlasAdapter atlasAdapter;
@@ -73,6 +83,37 @@ public class IngestResource {
     @POST
     @Consumes({MediaType.APPLICATION_JSON, "application/ld+json"})
     @Produces(MediaType.APPLICATION_JSON)
+    @Operation(
+            summary = "Submit a provenance record",
+            description = "Validates the record synchronously and stores it byte-identical with its verdict:"
+                    + " VALIDATED (published, no longer changeable) or INCOMPLETE (carries its issues,"
+                    + " corrected by resubmitting).")
+    @RequestBody(
+            required = true,
+            description = "A Sourcelume ProvenanceRecord as JSON-LD",
+            content = {
+                @Content(mediaType = "application/ld+json", schema = @Schema(type = SchemaType.OBJECT)),
+                @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(type = SchemaType.OBJECT))
+            })
+    @APIResponse(
+            responseCode = "201",
+            description = "New record stored with its verdict",
+            headers = @Header(name = "Location", description = "The record's status view"),
+            content = @Content(schema = @Schema(implementation = IngestResponse.class)))
+    @APIResponse(
+            responseCode = "200",
+            description = "Existing record resubmitted and stored with its new verdict",
+            headers = @Header(name = "Location", description = "The record's status view"),
+            content = @Content(schema = @Schema(implementation = IngestResponse.class)))
+    @APIResponse(
+            responseCode = "400",
+            description = "Unparseable document or no usable id",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @APIResponse(
+            responseCode = "409",
+            description = "The record is already VALIDATED",
+            content = @Content(schema = @Schema(implementation = ConflictResponse.class)))
+    @APIResponse(responseCode = "415", description = "Unsupported content type")
     public Response submit(byte[] received) {
         String rawJsonLd = new String(received, StandardCharsets.UTF_8);
         String recordId;
@@ -119,7 +160,18 @@ public class IngestResource {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response status(@PathParam("id") String id) {
+    @Operation(summary = "Get a record's stored state and verdict")
+    @APIResponse(
+            responseCode = "200",
+            description = "The stored record",
+            content = @Content(schema = @Schema(implementation = RecordResponse.class)))
+    @APIResponse(
+            responseCode = "404",
+            description = "No record for this id",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    public Response status(
+            @Parameter(description = "The record's id (IRI); encode it when calling the API directly") @PathParam("id")
+                    String id) {
         SourcelumeDatasetDto dataset = atlasAdapter.getDatasetByQualifiedName(id);
         if (dataset == null) {
             return Response.status(404)

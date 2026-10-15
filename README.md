@@ -75,6 +75,8 @@ docker compose up -d
 - Readiness (Atlas connectivity): `http://localhost:8082/q/health/ready`
 - Liveness probe: `http://localhost:8082/q/health/live`
 - Prometheus metrics: `http://localhost:8082/q/metrics`
+- OpenAPI document: `http://localhost:8082/q/openapi`
+- Swagger UI (dev mode): `http://localhost:8082/q/swagger-ui`
 
 Configuration lives under the `sourcelume.atlas.*` properties
 (`sourcelume-registry-runtime-quarkus/src/main/resources/application.properties`).
