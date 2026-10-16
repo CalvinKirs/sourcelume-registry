@@ -26,6 +26,13 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.apache.sourcelume.registry.core.validation.ValidatorChain;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 /**
  * Pre-flight validation endpoint: {@code POST /records/validate} runs the
@@ -47,6 +54,7 @@ import org.apache.sourcelume.registry.core.validation.ValidatorChain;
  * callers get one consistent error contract per validator path.
  */
 @Path("/records/validate")
+@Tag(name = "Records")
 public class RecordValidationResource {
 
     private final ValidatorChain validatorChain;
@@ -59,6 +67,21 @@ public class RecordValidationResource {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @Operation(
+            summary = "Validate a provenance record without storing it",
+            description = "Runs the validator chain (JSON Schema, then SHACL), stopping at the first failing stage.")
+    @RequestBody(
+            required = true,
+            description = "A Sourcelume ProvenanceRecord as JSON-LD",
+            content = @Content(schema = @Schema(type = SchemaType.OBJECT)))
+    @APIResponse(
+            responseCode = "200",
+            description = "The record conforms",
+            content = @Content(schema = @Schema(implementation = ValidationResponse.class)))
+    @APIResponse(
+            responseCode = "422",
+            description = "The record does not conform, or is not valid JSON",
+            content = @Content(schema = @Schema(implementation = ValidationResponse.class)))
     public Response validate(String jsonLd) {
         ValidationResult result = validatorChain.validate(jsonLd);
         // 422 Unprocessable Entity: well-formed request, semantic rejection —

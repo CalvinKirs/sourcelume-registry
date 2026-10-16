@@ -26,6 +26,12 @@ import jakarta.ws.rs.core.Response;
 import java.nio.charset.StandardCharsets;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.AtlasAdapter.TypeDefinitionModel;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 /**
  * REST endpoint exposing Sourcelume model and type definitions.
@@ -36,6 +42,7 @@ import org.apache.sourcelume.registry.core.AtlasAdapter.TypeDefinitionModel;
  * </ul>
  */
 @Path("/api/v1/types")
+@Tag(name = "Types", description = "The Sourcelume type definitions registered in the backend")
 @ApplicationScoped
 @Produces(MediaType.APPLICATION_JSON)
 public class TypeResource {
@@ -52,6 +59,11 @@ public class TypeResource {
      */
     @GET
     @Path("/typedefs")
+    @Operation(summary = "Get the Sourcelume typedefs")
+    @APIResponse(
+            responseCode = "200",
+            description = "The typedefs model",
+            content = @Content(schema = @Schema(type = SchemaType.OBJECT)))
     public Response getTypeDefs() {
         TypeDefinitionModel model = atlasAdapter.loadTypeDefs("models/sourcelume/sourcelume_model.json");
         return Response.ok(new String(model.getRawJson(), StandardCharsets.UTF_8))
@@ -63,6 +75,13 @@ public class TypeResource {
      */
     @GET
     @Path("/dataset")
+    @Operation(
+            summary = "Get the Sourcelume typedefs",
+            description = "Currently returns the full typedefs model, the same as /api/v1/types/typedefs.")
+    @APIResponse(
+            responseCode = "200",
+            description = "The typedefs model",
+            content = @Content(schema = @Schema(type = SchemaType.OBJECT)))
     public Response getDatasetTypeDef() {
         TypeDefinitionModel model = atlasAdapter.loadTypeDefs("models/sourcelume/sourcelume_model.json");
         return Response.ok(new String(model.getRawJson(), StandardCharsets.UTF_8))

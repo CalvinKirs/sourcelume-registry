@@ -1,0 +1,383 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+---
+openapi: 3.1.0
+components:
+  schemas:
+    ConflictResponse:
+      type: object
+      properties:
+        qualifiedName:
+          type: string
+        recordStatus:
+          $ref: "#/components/schemas/RecordStatus"
+    DatasetErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+    IngestResponse:
+      type: object
+      properties:
+        qualifiedName:
+          type: string
+        recordStatus:
+          $ref: "#/components/schemas/RecordStatus"
+        validationIssues:
+          type: string
+        sha256:
+          type: string
+        validatedBy:
+          type: string
+        validatedAt:
+          type: string
+    Issue:
+      type: object
+      properties:
+        validatorId:
+          type: string
+        severity:
+          type: string
+        path:
+          type: string
+        message:
+          type: string
+    RecordResponse:
+      type: object
+      properties:
+        qualifiedName:
+          type: string
+        recordStatus:
+          $ref: "#/components/schemas/RecordStatus"
+        name:
+          type: string
+        licenseId:
+          type: string
+        sourceUri:
+          type: string
+        validationIssues:
+          type: string
+        sha256:
+          type: string
+        validatedBy:
+          type: string
+        validatedAt:
+          type: string
+    RecordStatus:
+      type: string
+      enum:
+      - INCOMPLETE
+      - VALIDATED
+    SourcelumeDatasetDto:
+      type: object
+      required:
+      - qualifiedName
+      properties:
+        qualifiedName:
+          type: string
+          pattern: \S
+        name:
+          type: string
+        description:
+          type: string
+        sourceUri:
+          type: string
+        licenseId:
+          type: string
+        guid:
+          type: string
+        recordStatus:
+          $ref: "#/components/schemas/RecordStatus"
+        rawJsonLd:
+          type: string
+        validationIssues:
+          type: string
+        sha256:
+          type: string
+        validatedBy:
+          type: string
+        validatedAt:
+          type: string
+    ValidationResponse:
+      type: object
+      properties:
+        conforms:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/Issue"
+tags:
+- name: Datasets
+  description: Plain dataset entities; provenance records are managed via /records
+- name: Records
+  description: Submit provenance records and read their verdicts
+- name: Types
+  description: The Sourcelume type definitions registered in the backend
+paths:
+  /api/v1/datasets:
+    get:
+      summary: Get a dataset by qualifiedName
+      tags:
+      - Datasets
+      parameters:
+      - description: The dataset's qualified name
+        required: true
+        name: qualifiedName
+        in: query
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The dataset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourcelumeDatasetDto"
+        "400":
+          description: Missing qualifiedName
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetErrorResponse"
+        "404":
+          description: No dataset for this qualifiedName
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetErrorResponse"
+    post:
+      summary: Create or update a dataset entity
+      tags:
+      - Datasets
+      requestBody:
+        description: "Plain dataset attributes. Verdict fields (recordStatus, rawJsonLd,\
+          \ validationIssues, sha256, validatedBy, validatedAt) are set by the registry\
+          \ and rejected."
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourcelumeDatasetDto"
+      responses:
+        "201":
+          description: "Dataset stored, with its assigned GUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourcelumeDatasetDto"
+        "400":
+          description: "Missing qualifiedName or name, or verdict fields set"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetErrorResponse"
+        "409":
+          description: The qualifiedName is a provenance record; use POST /records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetErrorResponse"
+  /api/v1/datasets/guid/{guid}:
+    get:
+      summary: Get a dataset by its backend GUID
+      tags:
+      - Datasets
+      parameters:
+      - name: guid
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The dataset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourcelumeDatasetDto"
+        "404":
+          description: No dataset for this GUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetErrorResponse"
+  /api/v1/datasets/{qualifiedName}:
+    get:
+      summary: Get a dataset by qualifiedName in the path
+      tags:
+      - Datasets
+      parameters:
+      - name: qualifiedName
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: .+
+      responses:
+        "200":
+          description: The dataset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourcelumeDatasetDto"
+        "404":
+          description: No dataset for this qualifiedName
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetErrorResponse"
+  /api/v1/types/dataset:
+    get:
+      summary: Get the Sourcelume typedefs
+      description: "Currently returns the full typedefs model, the same as /api/v1/types/typedefs."
+      tags:
+      - Types
+      responses:
+        "200":
+          description: The typedefs model
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/types/typedefs:
+    get:
+      summary: Get the Sourcelume typedefs
+      tags:
+      - Types
+      responses:
+        "200":
+          description: The typedefs model
+          content:
+            application/json:
+              schema:
+                type: object
+  /records:
+    post:
+      summary: Submit a provenance record
+      description: "Validates the record synchronously and stores it byte-identical\
+        \ with its verdict: VALIDATED (published, no longer changeable) or INCOMPLETE\
+        \ (carries its issues, corrected by resubmitting)."
+      tags:
+      - Records
+      requestBody:
+        description: A Sourcelume ProvenanceRecord as JSON-LD
+        content:
+          application/ld+json:
+            schema:
+              type: object
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "201":
+          description: New record stored with its verdict
+          headers:
+            Location:
+              description: The record's status view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "200":
+          description: Existing record resubmitted and stored with its new verdict
+          headers:
+            Location:
+              description: The record's status view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "400":
+          description: Unparseable document or no usable id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The record is already VALIDATED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConflictResponse"
+        "415":
+          description: Unsupported content type
+  /records/validate:
+    post:
+      summary: Validate a provenance record without storing it
+      description: "Runs the validator chain (JSON Schema, then SHACL), stopping at\
+        \ the first failing stage."
+      tags:
+      - Records
+      requestBody:
+        description: A Sourcelume ProvenanceRecord as JSON-LD
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "200":
+          description: The record conforms
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResponse"
+        "422":
+          description: "The record does not conform, or is not valid JSON"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResponse"
+  /records/{id}:
+    get:
+      summary: Get a record's stored state and verdict
+      tags:
+      - Records
+      parameters:
+      - description: The record's id (IRI); encode it when calling the API directly
+        name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The stored record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordResponse"
+        "404":
+          description: No record for this id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+info:
+  title: Apache Sourcelume Registry API
+  version: 0.0.1-SNAPSHOT
+  description: "Submit, validate and query Apache Sourcelume provenance records."
+  license:
+    name: Apache License 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
