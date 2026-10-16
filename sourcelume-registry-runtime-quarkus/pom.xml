@@ -118,6 +118,12 @@
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-smallrye-openapi</artifactId>
     </dependency>
+    <!-- Declared explicitly: Swagger UI is part of this module's contract,
+         not something to inherit from quarkus-smallrye-openapi's wiring -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-swagger-ui</artifactId>
+    </dependency>
 
     <!-- Test -->
     <dependency>
