@@ -57,7 +57,18 @@ class DatasetResourceTest {
                 .extract()
                 .path("guid");
 
-        // 2. Fetch by query parameter
+        // 2. Update the existing dataset
+        dataset.setDescription("Updated description");
+        given().contentType(ContentType.JSON)
+                .body(dataset)
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(200)
+                .body("guid", equalTo(guid))
+                .body("description", equalTo("Updated description"));
+
+        // 3. Fetch by query parameter
         given().queryParam("qualifiedName", "sourcelume://datasets/test-1")
                 .when()
                 .get("/api/v1/datasets")
@@ -66,7 +77,7 @@ class DatasetResourceTest {
                 .body("qualifiedName", equalTo("sourcelume://datasets/test-1"))
                 .body("guid", equalTo(guid));
 
-        // 3. Fetch by path parameter (both full and collapsed URI paths)
+        // 4. Fetch by path parameter (both full and collapsed URI paths)
         given().when()
                 .get("/api/v1/datasets/sourcelume://datasets/test-1")
                 .then()
@@ -81,7 +92,7 @@ class DatasetResourceTest {
                 .body("qualifiedName", equalTo("sourcelume://datasets/test-1"))
                 .body("name", equalTo("Test Dataset 1"));
 
-        // 4. Fetch by GUID
+        // 5. Fetch by GUID
         given().when()
                 .get("/api/v1/datasets/guid/" + guid)
                 .then()

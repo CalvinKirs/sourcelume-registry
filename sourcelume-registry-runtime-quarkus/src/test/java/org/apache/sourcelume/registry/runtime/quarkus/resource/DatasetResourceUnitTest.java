@@ -162,7 +162,7 @@ class DatasetResourceUnitTest {
 
         Response response = resource.createOrUpdateDataset(plainDataset("sourcelume://datasets/test"));
 
-        assertEquals(Response.Status.CREATED.getStatusCode(), response.getStatus());
+        assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
         assertEquals(1, adapter.writes);
     }
 

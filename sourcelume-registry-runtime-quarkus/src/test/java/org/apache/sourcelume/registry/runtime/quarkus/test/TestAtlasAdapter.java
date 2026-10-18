@@ -59,9 +59,10 @@ public class TestAtlasAdapter implements AtlasAdapter {
 
     @Override
     public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
+        SourcelumeDatasetDto existing = byQualifiedName.get(dataset.getQualifiedName());
         String guid = dataset.getGuid() != null
                 ? dataset.getGuid()
-                : UUID.randomUUID().toString();
+                : existing != null ? existing.getGuid() : UUID.randomUUID().toString();
         dataset.setGuid(guid);
         byQualifiedName.put(dataset.getQualifiedName(), dataset);
         byGuid.put(guid, dataset);

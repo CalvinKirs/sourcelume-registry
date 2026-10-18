@@ -62,7 +62,7 @@ class OpenApiDocumentTest {
                 .get("/q/openapi")
                 .then()
                 .statusCode(200)
-                .body("paths.'/api/v1/datasets'.post.responses.keySet()", hasItems("201", "400", "409"))
+                .body("paths.'/api/v1/datasets'.post.responses.keySet()", hasItems("200", "201", "400", "409"))
                 .body("paths.'/api/v1/datasets'.get.responses.keySet()", hasItems("200", "400", "404"))
                 .body("paths.'/api/v1/datasets/guid/{guid}'.get.responses.keySet()", hasItems("200", "404"))
                 .body("paths.'/api/v1/types/typedefs'.get.responses", hasKey("200"));
