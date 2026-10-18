@@ -185,6 +185,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SourcelumeDatasetDto"
+        "200":
+          description: "Existing dataset updated, with its assigned GUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourcelumeDatasetDto"
         "400":
           description: "Missing qualifiedName or name, or verdict fields set"
           content:

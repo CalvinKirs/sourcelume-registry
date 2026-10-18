@@ -70,8 +70,8 @@ public class DatasetResource {
      * Creates or updates a Sourcelume dataset entity. Provenance records are managed via {@code POST /records}.
      *
      * @param dataset the dataset DTO to persist
-     * @return 201 Created with the persisted dataset DTO including assigned GUID, 400 Bad Request, or
-     *     409 Conflict if the qualifiedName is a provenance record
+     * @return 201 Created for a new dataset, 200 OK for an updated dataset, 400 Bad Request, or 409 Conflict if
+     *     the qualifiedName is a provenance record
      */
     @POST
     @Operation(summary = "Create or update a dataset entity")
@@ -82,6 +82,10 @@ public class DatasetResource {
     @APIResponse(
             responseCode = "201",
             description = "Dataset stored, with its assigned GUID",
+            content = @Content(schema = @Schema(implementation = SourcelumeDatasetDto.class)))
+    @APIResponse(
+            responseCode = "200",
+            description = "Existing dataset updated, with its assigned GUID",
             content = @Content(schema = @Schema(implementation = SourcelumeDatasetDto.class)))
     @APIResponse(
             responseCode = "400",
@@ -123,7 +127,8 @@ public class DatasetResource {
         String guid = atlasAdapter.createOrUpdateDatasetEntity(dataset);
         dataset.setGuid(guid);
         log.info("Persisted dataset entity '{}' (GUID: {})", dataset.getQualifiedName(), guid);
-        return Response.status(Response.Status.CREATED).entity(dataset).build();
+        Response.Status status = existing == null ? Response.Status.CREATED : Response.Status.OK;
+        return Response.status(status).entity(dataset).build();
     }
 
     private static boolean carriesVerdictFields(SourcelumeDatasetDto dataset) {
