@@ -3,6 +3,7 @@
 .claude/
 .idea/
 .junie/
+.vscode/
 target/
 *.class
 
