@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.function.Consumer;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
@@ -194,26 +195,28 @@ class DatasetResourceUnitTest {
         }
 
         @Override
-        public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
+        public String createOrUpdateRecordEntity(RecordEntityDto record) {
             writes++;
             return "guid-created";
         }
 
         @Override
-        public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
-            if (datasetByQName != null && datasetByQName.getQualifiedName().equals(qualifiedName)) {
+        public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
+            if (datasetByQName != null
+                    && entityType.equals(datasetByQName.getTypeName())
+                    && datasetByQName.getQualifiedName().equals(qualifiedName)) {
                 return datasetByQName;
             }
             return null;
         }
 
         @Override
-        public SourcelumeDatasetDto getDatasetByGuid(String guid) {
+        public RecordEntityDto getRecordEntityByGuid(String guid) {
             return datasetByGuid;
         }
 
         @Override
-        public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+        public List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit) {
             return List.of();
         }
     }

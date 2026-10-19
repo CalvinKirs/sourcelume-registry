@@ -69,9 +69,13 @@ class RestAtlasAdapterTest {
         assertNotNull(td);
         assertEquals("models/sourcelume/sourcelume_model.json", td.getSourceResource());
         assertTrue(td.getRawJson().length > 0);
-        assertEquals(1, td.getEntityDefCount(), "expected exactly one entity def (sourcelume_dataset)");
+        assertEquals(
+                2,
+                td.getEntityDefCount(),
+                "expected the dataset and model entity defs (sourcelume_dataset, sourcelume_model)");
         String json = new String(td.getRawJson());
         assertTrue(json.contains("sourcelume_dataset"), "typedef JSON should contain sourcelume_dataset");
+        assertTrue(json.contains("sourcelume_model"), "typedef JSON should contain sourcelume_model");
     }
 
     @Test
@@ -97,7 +101,7 @@ class RestAtlasAdapterTest {
         dataset.setValidatedBy("json-schema");
         dataset.setValidatedAt("2026-10-11T12:00:00Z");
 
-        String guid = adapter.createOrUpdateDatasetEntity(dataset);
+        String guid = adapter.createOrUpdateRecordEntity(dataset);
         assertEquals("new-guid-1", guid);
     }
 
@@ -110,7 +114,7 @@ class RestAtlasAdapterTest {
         dataset.setQualifiedName("https://rec/existing");
         dataset.setName("Existing Dataset");
 
-        String guid = adapter.createOrUpdateDatasetEntity(dataset);
+        String guid = adapter.createOrUpdateRecordEntity(dataset);
         assertEquals("updated-guid-1", guid);
     }
 
@@ -121,13 +125,13 @@ class RestAtlasAdapterTest {
         dataset.setQualifiedName("https://rec/assigned");
         dataset.setName("Assigned Dataset");
 
-        String guid = adapter.createOrUpdateDatasetEntity(dataset);
+        String guid = adapter.createOrUpdateRecordEntity(dataset);
         assertEquals("assigned-guid-1", guid);
     }
 
     @Test
     void testCreateOrUpdateDatasetEntityRejectsNull() {
-        assertThrows(IllegalArgumentException.class, () -> adapter.createOrUpdateDatasetEntity(null));
+        assertThrows(IllegalArgumentException.class, () -> adapter.createOrUpdateRecordEntity(null));
     }
 
     @Test
@@ -137,7 +141,7 @@ class RestAtlasAdapterTest {
         dataset.setQualifiedName("https://rec/error");
         dataset.setName("Error Dataset");
 
-        assertThrows(AtlasAdapterException.class, () -> adapter.createOrUpdateDatasetEntity(dataset));
+        assertThrows(AtlasAdapterException.class, () -> adapter.createOrUpdateRecordEntity(dataset));
     }
 
     @Test
@@ -145,7 +149,8 @@ class RestAtlasAdapterTest {
         serve(
                 200,
                 "{\"entity\":{\"guid\":\"guid-123\",\"attributes\":{\"qualifiedName\":\"https://rec/1\",\"name\":\"Dataset 1\",\"recordStatus\":\"VALIDATED\"}}}");
-        SourcelumeDatasetDto dto = adapter.getDatasetByQualifiedName("https://rec/1");
+        SourcelumeDatasetDto dto = (SourcelumeDatasetDto)
+                adapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, "https://rec/1");
         assertNotNull(dto);
         assertEquals("guid-123", dto.getGuid());
         assertEquals("https://rec/1", dto.getQualifiedName());
@@ -156,7 +161,7 @@ class RestAtlasAdapterTest {
     @Test
     void testGetDatasetByQualifiedNameReturnsNullOn404() {
         serve(404, "{\"errorMessage\":\"Not Found\"}");
-        assertNull(adapter.getDatasetByQualifiedName("https://rec/missing"));
+        assertNull(adapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, "https://rec/missing"));
     }
 
     @Test
@@ -164,7 +169,9 @@ class RestAtlasAdapterTest {
         serve(
                 200,
                 "{\"entity\":{\"guid\":\"guid-123\",\"attributes\":{\"qualifiedName\":\"https://rec/1\",\"recordStatus\":\"UNKNOWN_STATUS\"}}}");
-        assertThrows(AtlasAdapterException.class, () -> adapter.getDatasetByQualifiedName("https://rec/1"));
+        assertThrows(
+                AtlasAdapterException.class,
+                () -> adapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, "https://rec/1"));
     }
 
     @Test

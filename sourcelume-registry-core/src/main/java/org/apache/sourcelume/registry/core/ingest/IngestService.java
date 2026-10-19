@@ -16,7 +16,7 @@
  */
 package org.apache.sourcelume.registry.core.ingest;
 
-import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 
 /**
  * SPI for the ingest pipeline step that turns a submitted record into
@@ -34,13 +34,14 @@ import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 public interface IngestService {
 
     /**
-     * Processes one submitted dataset: validates its rawJsonLd and stores
+     * Processes one submitted record: validates its rawJsonLd and stores
      * the entity with its verdict — VALIDATED (mapped attributes) or
      * INCOMPLETE (validation issues on the entity). The raw document is
-     * stored byte-identical.
+     * stored byte-identical, under the entity type the record's own
+     * {@code type} term selects.
      *
-     * @param submitted the submitted dataset, never null
+     * @param submitted the submitted record, never null
      * @return the outcome of the run, never null
      */
-    IngestResult process(SourcelumeDatasetDto submitted);
+    IngestResult process(RecordEntityDto submitted);
 }

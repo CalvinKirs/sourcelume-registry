@@ -68,6 +68,18 @@ Deployments pick the stages they want by adding or removing plugin jars;
 the discovery mechanism does the rest. The core stays free of both
 networknt and Jena dependencies.
 
+Both stages are record-type aware — the spec defines more than one
+record type (`ProvenanceRecord`, `TrainingProvenanceRecord`):
+
+- The `json-schema` plugin bundles one schema per record type and picks
+  it by the document's `type` term — the same selection `validate.py`
+  makes via its `SCHEMA_FILES` map. A document with no usable `type`, or
+  one no bundled schema knows, fails the stage.
+- The `shacl` plugin's shapes target each record class
+  (`sl:ProvenanceRecord`, `sl:TrainingProvenanceRecord`); its
+  trivial-conformance guard (below) accepts a node of any known record
+  type as the focus.
+
 ### Usage
 
 ```java
@@ -170,10 +182,11 @@ silently accepting garbage would be worse than rejecting the document.
 
 The same trivial-conformance concern applies to context *games*: an inline
 context can redefine the `type` term mapping (or be simply empty), in which
-case the document expands to no `sl:ProvenanceRecord` node and the shapes
+case the document expands to no node of a known record type and the shapes
 would conform vacuously. The plugin therefore refuses any graph that,
-after expansion, contains no node typed `sl:ProvenanceRecord` — validation
-must never succeed by dropping the focus node.
+after expansion, contains no node typed `sl:ProvenanceRecord` or
+`sl:TrainingProvenanceRecord` — validation must never succeed by dropping
+the focus node.
 
 ### Format assertions (parity with jsonschema[format])
 

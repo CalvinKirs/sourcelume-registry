@@ -38,6 +38,7 @@ class IngestResultTest {
 
         IngestResult result = new IngestResult(
                 "https://example.org/records/one",
+                "ProvenanceRecord",
                 RecordStatus.INCOMPLETE,
                 validation,
                 "0123abc",
@@ -55,9 +56,21 @@ class IngestResultTest {
     @Test
     void isValueEqual() {
         IngestResult a = new IngestResult(
-                "q", RecordStatus.VALIDATED, ValidationResult.OK, "abc", "chain", "2026-10-04T14:00:00Z");
+                "q",
+                "ProvenanceRecord",
+                RecordStatus.VALIDATED,
+                ValidationResult.OK,
+                "abc",
+                "chain",
+                "2026-10-04T14:00:00Z");
         IngestResult b = new IngestResult(
-                "q", RecordStatus.VALIDATED, ValidationResult.OK, "abc", "chain", "2026-10-04T14:00:00Z");
+                "q",
+                "ProvenanceRecord",
+                RecordStatus.VALIDATED,
+                ValidationResult.OK,
+                "abc",
+                "chain",
+                "2026-10-04T14:00:00Z");
 
         assertEquals(a, b);
         assertEquals(a.hashCode(), b.hashCode());

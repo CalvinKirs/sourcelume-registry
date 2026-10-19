@@ -125,7 +125,7 @@ class DatasetResourceTest {
         record.setName("Locked record");
         record.setLicenseId("https://spdx.org/licenses/Apache-2.0.html");
         record.setRecordStatus(RecordStatus.VALIDATED);
-        atlasAdapter.createOrUpdateDatasetEntity(record);
+        atlasAdapter.createOrUpdateRecordEntity(record);
 
         // 1. Forged verdict
         given().contentType(ContentType.JSON)

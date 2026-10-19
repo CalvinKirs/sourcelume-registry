@@ -206,6 +206,8 @@
           <excludes>
             <exclude>.git-blame-ignore-revs</exclude>
             <exclude>.junie/**</exclude>
+            <!-- Local git worktree checkouts created by tooling; not part of the source tree -->
+            <exclude>.worktrees/**</exclude>
             <!-- JSON-LD data records cannot contain comments without breaking JSON parsing -->
             <exclude>**/*.jsonld</exclude>
           </excludes>

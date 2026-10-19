@@ -27,8 +27,11 @@ import com.networknt.schema.SchemaRegistry;
 import com.networknt.schema.SchemaRegistryConfig;
 import com.networknt.schema.dialect.Dialect;
 import com.networknt.schema.dialect.Dialects;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.spec.SpecResourceLoader;
 import org.apache.sourcelume.registry.core.validation.RecordValidator;
 import org.apache.sourcelume.registry.core.validation.ValidationIssue;
@@ -36,7 +39,14 @@ import org.apache.sourcelume.registry.core.validation.ValidationResult;
 
 /**
  * Structural validation stage of the RecordValidator chain: checks the raw
- * JSON document against the sourcelume-spec JSON Schema (draft 2020-12).
+ * JSON document against the sourcelume-spec JSON Schema (draft 2020-12) for
+ * its record type.
+ *
+ * <p>One schema per record type, picked by the document's {@code type}
+ * term — the same selection the Python reference validator makes
+ * (tools/validate.py, its {@code SCHEMA_FILES} map). A document whose
+ * {@code type} is absent or unknown fails here: there is no schema to
+ * judge it by.
  *
  * <p>Format assertions ("date-time", "uri") are enabled explicitly. Since JSON
  * Schema draft 2019-09 the "format" keyword only annotates by default; the
@@ -60,24 +70,23 @@ public final class JsonSchemaRecordValidator implements RecordValidator {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final Schema schema;
+    private final Map<String, Schema> schemasByType;
 
     /**
-     * Creates a validator using the default schema bundled in sourcelume-spec.
+     * Creates a validator using the schemas bundled in sourcelume-spec —
+     * one per {@link RecordType}.
      */
     public JsonSchemaRecordValidator() {
-        this(SpecResourceLoader.DEFAULT_SCHEMA_RESOURCE);
+        this(defaultSchemaResources());
     }
 
     /**
-     * Creates a validator for a specific schema classpath resource. Visible
+     * Creates a validator for explicit per-type schema resources. Visible
      * for tests and for future multi-version support.
      *
-     * @param schemaResource classpath resource path of the JSON Schema
+     * @param schemaResourcesByType record type term → schema classpath resource
      */
-    JsonSchemaRecordValidator(String schemaResource) {
-        String schemaJson = SpecResourceLoader.loadResourceString(schemaResource);
-        JsonNode schemaNode = readTree(schemaJson);
+    JsonSchemaRecordValidator(Map<String, String> schemaResourcesByType) {
         SchemaRegistryConfig config = SchemaRegistryConfig.builder()
                 .formatAssertionsEnabled(true)
                 .locale(Locale.ROOT)
@@ -85,7 +94,20 @@ public final class JsonSchemaRecordValidator implements RecordValidator {
         Dialect dialect = Dialects.getDraft202012();
         SchemaRegistry registry = SchemaRegistry.withDialect(dialect, builder -> builder.schemaRegistryConfig(config));
         SchemaContext context = new SchemaContext(dialect, registry);
-        this.schema = context.newSchema(SchemaLocation.DOCUMENT, schemaNode, null);
+        Map<String, Schema> schemas = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : schemaResourcesByType.entrySet()) {
+            String schemaJson = SpecResourceLoader.loadResourceString(entry.getValue());
+            schemas.put(entry.getKey(), context.newSchema(SchemaLocation.DOCUMENT, readTree(schemaJson), null));
+        }
+        this.schemasByType = Map.copyOf(schemas);
+    }
+
+    private static Map<String, String> defaultSchemaResources() {
+        Map<String, String> resources = new LinkedHashMap<>();
+        for (RecordType type : RecordType.values()) {
+            resources.put(type.typeName(), type.schemaResource());
+        }
+        return resources;
     }
 
     @Override
@@ -107,6 +129,18 @@ public final class JsonSchemaRecordValidator implements RecordValidator {
             return ValidationResult.failed(
                     List.of(ValidationIssue.violation(ID, "/", "Not valid JSON: " + e.getOriginalMessage())));
         }
+
+        JsonNode type = document.path("type");
+        if (!type.isTextual() || type.asText().isBlank()) {
+            return ValidationResult.failed(List.of(ValidationIssue.violation(
+                    ID, "/type", "Document carries no usable 'type' term — a record type selects its schema")));
+        }
+        Schema schema = schemasByType.get(type.asText());
+        if (schema == null) {
+            return ValidationResult.failed(List.of(ValidationIssue.violation(
+                    ID, "/type", "Unknown record type '" + type.asText() + "' — no schema is bundled for it")));
+        }
+
         List<Error> errors = schema.validate(document);
         if (errors.isEmpty()) {
             return ValidationResult.OK;

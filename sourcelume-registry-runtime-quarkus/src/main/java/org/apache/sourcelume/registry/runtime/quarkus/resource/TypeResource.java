@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.AtlasAdapter.TypeDefinitionModel;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -47,6 +48,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * <ul>
  *   <li>{@code GET /api/v1/types/typedefs} — returns full typedefs model</li>
  *   <li>{@code GET /api/v1/types/dataset} — returns dataset entity definition model</li>
+ *   <li>{@code GET /api/v1/types/model} — returns model entity definition model</li>
  * </ul>
  */
 @Path("/api/v1/types")
@@ -92,27 +94,46 @@ public class TypeResource {
                     + " in the typedefs format",
             content = @Content(schema = @Schema(type = SchemaType.OBJECT)))
     public Response getDatasetTypeDef() throws IOException {
+        return entityTypeDef(SourcelumeDatasetDto.TYPE_NAME);
+    }
+
+    /**
+     * Returns the Sourcelume model entity definition and the enums its attributes use.
+     */
+    @GET
+    @Path("/model")
+    @Operation(summary = "Get the model entity definition")
+    @APIResponse(
+            responseCode = "200",
+            description = "The sourcelume_model entity definition and the enums its attributes use,"
+                    + " in the typedefs format",
+            content = @Content(schema = @Schema(type = SchemaType.OBJECT)))
+    public Response getModelTypeDef() throws IOException {
+        return entityTypeDef(SourcelumeModelDto.TYPE_NAME);
+    }
+
+    private Response entityTypeDef(String entityTypeName) throws IOException {
         TypeDefinitionModel model = atlasAdapter.loadTypeDefs("models/sourcelume/sourcelume_model.json");
         JsonNode typeDefs = objectMapper.readTree(model.getRawJson());
-        JsonNode datasetDef = findByName(typeDefs.path("entityDefs"), SourcelumeDatasetDto.TYPE_NAME);
-        if (datasetDef == null) {
-            throw new IllegalStateException(SourcelumeDatasetDto.TYPE_NAME + " is missing from the typedefs");
+        JsonNode entityDef = findByName(typeDefs.path("entityDefs"), entityTypeName);
+        if (entityDef == null) {
+            throw new IllegalStateException(entityTypeName + " is missing from the typedefs");
         }
 
         // Exact type names only: collection types (array<...>) and structDefs are not resolved
         Set<String> attributeTypes = new HashSet<>();
-        for (JsonNode attributeDef : datasetDef.path("attributeDefs")) {
+        for (JsonNode attributeDef : entityDef.path("attributeDefs")) {
             attributeTypes.add(attributeDef.path("typeName").asText());
         }
-        ObjectNode datasetTypeDef = objectMapper.createObjectNode();
-        ArrayNode enumDefs = datasetTypeDef.putArray("enumDefs");
+        ObjectNode entityTypeDef = objectMapper.createObjectNode();
+        ArrayNode enumDefs = entityTypeDef.putArray("enumDefs");
         for (JsonNode enumDef : typeDefs.path("enumDefs")) {
             if (attributeTypes.contains(enumDef.path("name").asText())) {
                 enumDefs.add(enumDef);
             }
         }
-        datasetTypeDef.putArray("entityDefs").add(datasetDef);
-        return Response.ok(datasetTypeDef).build();
+        entityTypeDef.putArray("entityDefs").add(entityDef);
+        return Response.ok(entityTypeDef).build();
     }
 
     private static JsonNode findByName(JsonNode defs, String name) {

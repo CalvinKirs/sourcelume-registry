@@ -23,8 +23,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
-import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.junit.jupiter.api.Test;
 
@@ -76,17 +76,22 @@ class TypeResourceUnitTest {
         }
 
         @Override
-        public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
+        public String createOrUpdateRecordEntity(RecordEntityDto record) {
             return null;
         }
 
         @Override
-        public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
+        public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
             return null;
         }
 
         @Override
-        public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+        public RecordEntityDto getRecordEntityByGuid(String guid) {
+            return null;
+        }
+
+        @Override
+        public List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit) {
             return List.of();
         }
     }

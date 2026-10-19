@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.util.List;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
@@ -93,7 +94,7 @@ class IngestResourceTest {
         assertTrue(body.validatedBy().contains("json"), "the chain ids are reported");
         assertNotNull(body.validatedAt(), "the verdict carries its timestamp");
 
-        SourcelumeDatasetDto stored = fake.store.get(RECORD_ID);
+        SourcelumeDatasetDto stored = (SourcelumeDatasetDto) fake.store.get(RECORD_ID);
         assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
         assertEquals("Ingest endpoint test record", stored.getName(), "the mapped name replaces the placeholder");
         assertEquals("https://www.apache.org/licenses/LICENSE-2.0", stored.getLicenseId());
@@ -112,7 +113,7 @@ class IngestResourceTest {
                 body.validationIssues().toLowerCase().contains("license"),
                 "the issues come with the response — no polling needed");
 
-        SourcelumeDatasetDto stored = fake.store.get(RECORD_ID);
+        SourcelumeDatasetDto stored = (SourcelumeDatasetDto) fake.store.get(RECORD_ID);
         assertEquals(RecordStatus.INCOMPLETE, stored.getRecordStatus());
         assertEquals(
                 "ingest-test",
@@ -136,7 +137,7 @@ class IngestResourceTest {
         assertEquals(RecordStatus.VALIDATED, body.recordStatus());
         assertNull(body.validationIssues(), "the old failure report does not surface");
 
-        SourcelumeDatasetDto stored = fake.store.get(RECORD_ID);
+        SourcelumeDatasetDto stored = (SourcelumeDatasetDto) fake.store.get(RECORD_ID);
         assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
         assertEquals(
                 SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES,
@@ -208,7 +209,7 @@ class IngestResourceTest {
     /** In-memory stand-in for the Atlas backend: a map keyed by qualifiedName. */
     static class FakeAtlasAdapter implements AtlasAdapter {
 
-        final java.util.Map<String, SourcelumeDatasetDto> store = new java.util.HashMap<>();
+        final java.util.Map<String, RecordEntityDto> store = new java.util.HashMap<>();
 
         @Override
         public boolean isServerReady() {
@@ -226,20 +227,26 @@ class IngestResourceTest {
         }
 
         @Override
-        public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
-            store.put(dataset.getQualifiedName(), dataset);
-            return dataset.getGuid() != null ? dataset.getGuid() : "guid-1";
+        public String createOrUpdateRecordEntity(RecordEntityDto record) {
+            store.put(record.getQualifiedName(), record);
+            return record.getGuid() != null ? record.getGuid() : "guid-1";
         }
 
         @Override
-        public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
-            return store.get(qualifiedName);
+        public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
+            RecordEntityDto stored = store.get(qualifiedName);
+            return stored != null && entityType.equals(stored.getTypeName()) ? stored : null;
         }
 
         @Override
-        public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+        public RecordEntityDto getRecordEntityByGuid(String guid) {
+            return null;
+        }
+
+        @Override
+        public List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit) {
             return store.values().stream()
-                    .filter(dto -> status == dto.getRecordStatus())
+                    .filter(dto -> entityType.equals(dto.getTypeName()) && status == dto.getRecordStatus())
                     .limit(limit)
                     .toList();
         }

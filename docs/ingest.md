@@ -23,6 +23,29 @@ Submitting a provenance record to the registry validates it synchronously:
 record in Apache Atlas — byte-identical, keyed by its record IRI — and
 answers with the verdict.
 
+## Record types
+
+The spec defines more than one record type, and the record's own `type`
+term decides everything downstream — the schema it is judged by, the
+entity type it is stored under, and the attributes a VALIDATED record
+gets mapped to:
+
+| Record `type` | Atlas entity type | Mapped attributes (VALIDATED) |
+|---|---|---|
+| `ProvenanceRecord` | `sourcelume_dataset` | `name`, `description`, `sourceUri`, `licenseId` |
+| `TrainingProvenanceRecord` | `sourcelume_model` | `name`, `description`, `modelUri`, `modelVersion`, `disclosure` |
+
+A `TrainingProvenanceRecord` is the model producer's claim of which
+datasets a model was trained on; its `trainingData` list references
+dataset records by IRI. Per the spec design those referenced records are
+resolved when the model record is *read* — nothing about them is stored
+on the model entity — and the dataset records themselves stay untouched.
+
+A submission whose `type` is absent or unknown still gets its verdict:
+it fails validation (there is no schema for it) and lands as
+`INCOMPLETE` on the dataset entity, where it stays curatable like any
+other failed record.
+
 ## The flow
 
 ```
@@ -50,8 +73,8 @@ ACTIVE/DELETED/PURGED say whether an entity *exists*; this says what the
 validation *concluded*):
 
 - **VALIDATED** — the record conforms to the spec. Consumers should
-  filter on this status. The mapped provenance attributes (name,
-  licenseId, sourceUri) are written from the record.
+  filter on this status. The mapped provenance attributes are written
+  from the record (see the record-types table above).
 - **INCOMPLETE** — the record carries its validation issues and stays
   curatable. A corrected resubmission is validated in place.
 
@@ -66,11 +89,11 @@ GET status view both report the context.
 
 | Request | Result |
 |---|---|
-| `POST /records` (JSON-LD body) | `201` new record, `200` resubmission — body: `qualifiedName`, `recordStatus`, `sha256`, `validatedBy`, `validatedAt`, and for `INCOMPLETE` the `validationIssues` |
+| `POST /records` (JSON-LD body) | `201` new record, `200` resubmission — body: `qualifiedName`, `type`, `recordStatus`, `sha256`, `validatedBy`, `validatedAt`, and for `INCOMPLETE` the `validationIssues` |
 | `POST /records` for an id that is already VALIDATED | `409` |
 | `POST /records` without a usable `@id`, or unparseable | `400` |
 | `POST /records` with an unsupported content type | `415` |
-| `GET /records/{id}` | `200` record view (issues and verdict context for INCOMPLETE) / `404` |
+| `GET /records/{id}` | `200` record view: `type`, status, the type's mapped attributes, and for INCOMPLETE the issues + verdict context / `404` |
 
 The `id` of the JSON-LD document doubles as the record's qualified name;
 the `Location` header of the answers points at the (URL-encoded)

@@ -38,8 +38,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.apache.sourcelume.registry.atlas.adapter.config.SourcelumeAtlasProperties;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.AtlasAdapter.TypeDefinitionModel;
 import org.apache.sourcelume.registry.core.exception.AtlasAdapterException;
@@ -58,9 +60,9 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code GET  /api/atlas/admin/version} — readiness (via isServerReady)</li>
  *   <li>{@code POST /api/atlas/v2/types/typedefs} — create typedefs</li>
  *   <li>{@code PUT  /api/atlas/v2/types/typedefs} — update typedefs (on 409/conflict)</li>
- *   <li>{@code POST /api/atlas/v2/entity/bulk} — create/update a dataset entity</li>
+ *   <li>{@code POST /api/atlas/v2/entity/bulk} — create/update a record entity</li>
  *   <li>{@code GET  /api/atlas/v2/entity/uniqueAttribute/type/{typeName}?attr:qualifiedName=...} — lookup</li>
- *   <li>{@code POST /api/atlas/v2/search/basic} — find datasets by record status</li>
+ *   <li>{@code POST /api/atlas/v2/search/basic} — find record entities by record status</li>
  * </ul>
  *
  * <p>Atlas-specific JSON shapes live here and only here. The SPI stays
@@ -243,31 +245,39 @@ public class RestAtlasAdapter implements AtlasAdapter {
     }
 
     @Override
-    public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
-        if (dataset == null) {
-            throw new IllegalArgumentException("dataset cannot be null");
+    public String createOrUpdateRecordEntity(RecordEntityDto record) {
+        if (record == null) {
+            throw new IllegalArgumentException("record entity cannot be null");
         }
         ObjectNode entity = objectMapper.createObjectNode();
-        entity.put("typeName", SourcelumeDatasetDto.TYPE_NAME);
+        entity.put("typeName", record.getTypeName());
         ObjectNode attributes = entity.putObject("attributes");
-        attributes.put("qualifiedName", dataset.getQualifiedName());
+        attributes.put("qualifiedName", record.getQualifiedName());
         // Atlas' Asset supertype requires a name on every entity, so the
         // ingest path always provides one (a placeholder derived from the
         // record id until validation writes the mapped name); the DTO keeps
         // name optional for callers that are not the ingest path.
-        if (dataset.getName() != null) attributes.put("name", dataset.getName());
-        if (dataset.getDescription() != null) attributes.put("description", dataset.getDescription());
-        if (dataset.getSourceUri() != null) attributes.put("sourceUri", dataset.getSourceUri());
-        if (dataset.getLicenseId() != null) attributes.put("licenseId", dataset.getLicenseId());
-        if (dataset.getRecordStatus() != null)
-            attributes.put("recordStatus", dataset.getRecordStatus().name());
-        if (dataset.getRawJsonLd() != null) attributes.put("rawJsonLd", dataset.getRawJsonLd());
-        if (dataset.getValidationIssues() != null) {
-            attributes.put("validationIssues", dataset.getValidationIssues());
+        if (record.getName() != null) attributes.put("name", record.getName());
+        if (record.getDescription() != null) attributes.put("description", record.getDescription());
+        // The domain attributes depend on the entity type — the adapter owns
+        // the Atlas attribute vocabulary for each record type it knows.
+        if (record instanceof SourcelumeDatasetDto dataset) {
+            if (dataset.getSourceUri() != null) attributes.put("sourceUri", dataset.getSourceUri());
+            if (dataset.getLicenseId() != null) attributes.put("licenseId", dataset.getLicenseId());
+        } else if (record instanceof SourcelumeModelDto model) {
+            if (model.getModelUri() != null) attributes.put("modelUri", model.getModelUri());
+            if (model.getModelVersion() != null) attributes.put("modelVersion", model.getModelVersion());
+            if (model.getDisclosure() != null) attributes.put("disclosure", model.getDisclosure());
         }
-        if (dataset.getSha256() != null) attributes.put("sha256", dataset.getSha256());
-        if (dataset.getValidatedBy() != null) attributes.put("validatedBy", dataset.getValidatedBy());
-        if (dataset.getValidatedAt() != null) attributes.put("validatedAt", dataset.getValidatedAt());
+        if (record.getRecordStatus() != null)
+            attributes.put("recordStatus", record.getRecordStatus().name());
+        if (record.getRawJsonLd() != null) attributes.put("rawJsonLd", record.getRawJsonLd());
+        if (record.getValidationIssues() != null) {
+            attributes.put("validationIssues", record.getValidationIssues());
+        }
+        if (record.getSha256() != null) attributes.put("sha256", record.getSha256());
+        if (record.getValidatedBy() != null) attributes.put("validatedBy", record.getValidatedBy());
+        if (record.getValidatedAt() != null) attributes.put("validatedAt", record.getValidatedAt());
 
         ObjectNode wrapper = objectMapper.createObjectNode();
         ArrayNode entities = wrapper.putArray("entities");
@@ -278,11 +288,11 @@ public class RestAtlasAdapter implements AtlasAdapter {
             HttpResponse<String> resp = sendJson("POST", "/api/atlas/v2/entity/bulk", body);
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
                 throw new AtlasAdapterException(
-                        "Failed to persist dataset entity to Atlas: " + resp.body(), resp.statusCode(), null);
+                        "Failed to persist record entity to Atlas: " + resp.body(), resp.statusCode(), null);
             }
             JsonNode root = objectMapper.readTree(resp.body());
             String guid = extractGuid(root);
-            log.info("Created/updated dataset entity '{}' with GUID: {}", dataset.getQualifiedName(), guid);
+            log.info("Created/updated record entity '{}' with GUID: {}", record.getQualifiedName(), guid);
             // The caller's DTO is deliberately not mutated with the guid:
             // upserts take DTOs that may be shared snapshots; the guid is
             // returned instead, and reads resolve it via the qualified name.
@@ -296,14 +306,13 @@ public class RestAtlasAdapter implements AtlasAdapter {
     }
 
     @Override
-    public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
+    public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
         try {
             String q = URLEncoder.encode(qualifiedName, StandardCharsets.UTF_8);
             // /entity/bulk only resolves guids; the qualified name lookup
             // goes through the unique-attribute endpoint, which answers with
             // an AtlasEntityWithExtInfo ({"entity": {...}}) or 404.
-            String path = "/api/atlas/v2/entity/uniqueAttribute/type/" + SourcelumeDatasetDto.TYPE_NAME
-                    + "?attr:qualifiedName=" + q;
+            String path = "/api/atlas/v2/entity/uniqueAttribute/type/" + entityType + "?attr:qualifiedName=" + q;
             HttpRequest req = baseRequest("GET", path).GET().build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 404) {
@@ -311,14 +320,14 @@ public class RestAtlasAdapter implements AtlasAdapter {
             }
             if (resp.statusCode() != 200) {
                 throw new AtlasAdapterException(
-                        "Failed to fetch dataset entity from Atlas: " + resp.body(), resp.statusCode(), null);
+                        "Failed to fetch record entity from Atlas: " + resp.body(), resp.statusCode(), null);
             }
             JsonNode root = objectMapper.readTree(resp.body());
             JsonNode entity = root.path("entity");
             if (entity.isMissingNode() || entity.isNull()) {
                 return null;
             }
-            return toDatasetDto(entity);
+            return toRecordEntityDto(entity);
         } catch (IOException e) {
             throw new AtlasAdapterException("I/O error fetching entity: " + e.getMessage(), 500, e);
         } catch (InterruptedException e) {
@@ -328,7 +337,7 @@ public class RestAtlasAdapter implements AtlasAdapter {
     }
 
     @Override
-    public SourcelumeDatasetDto getDatasetByGuid(String guid) {
+    public RecordEntityDto getRecordEntityByGuid(String guid) {
         if (guid == null || guid.isBlank()) {
             return null;
         }
@@ -342,24 +351,27 @@ public class RestAtlasAdapter implements AtlasAdapter {
             }
             if (resp.statusCode() != 200) {
                 throw new AtlasAdapterException(
-                        "Failed to fetch dataset entity from Atlas by GUID: " + resp.body(), resp.statusCode(), null);
+                        "Failed to fetch record entity from Atlas by GUID: " + resp.body(), resp.statusCode(), null);
             }
             JsonNode root = objectMapper.readTree(resp.body());
             JsonNode entity = root.path("entity");
             if (entity.isMissingNode() || entity.isNull()) {
                 return null;
             }
-            return toDatasetDto(entity);
+            return toRecordEntityDto(entity);
         } catch (IOException e) {
-            throw new AtlasAdapterException("I/O error fetching dataset entity by GUID: " + e.getMessage(), 500, e);
+            throw new AtlasAdapterException("I/O error fetching record entity by GUID: " + e.getMessage(), 500, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AtlasAdapterException("Interrupted fetching dataset entity by GUID", 500, e);
+            throw new AtlasAdapterException("Interrupted fetching record entity by GUID", 500, e);
         }
     }
 
     @Override
-    public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+    public List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit) {
+        if (entityType == null || entityType.isBlank()) {
+            throw new IllegalArgumentException("entityType cannot be null or blank");
+        }
         if (status == null) {
             throw new IllegalArgumentException("status cannot be null");
         }
@@ -367,26 +379,14 @@ public class RestAtlasAdapter implements AtlasAdapter {
             throw new IllegalArgumentException("limit must be positive");
         }
         ObjectNode body = objectMapper.createObjectNode();
-        body.put("typeName", SourcelumeDatasetDto.TYPE_NAME);
+        body.put("typeName", entityType);
         body.put("excludeDeletedEntities", true);
         body.put("limit", limit);
         // Basic search returns entity headers only unless the attributes to
         // load are listed explicitly — without this, rawJsonLd and
         // recordStatus come back null and no record ever gets promoted.
         ArrayNode attributes = body.putArray("attributes");
-        for (String attribute : new String[] {
-            "qualifiedName",
-            "name",
-            "description",
-            "sourceUri",
-            "licenseId",
-            "recordStatus",
-            "rawJsonLd",
-            "validationIssues",
-            "sha256",
-            "validatedBy",
-            "validatedAt"
-        }) {
+        for (String attribute : attributesFor(entityType)) {
             attributes.add(attribute);
         }
         ObjectNode filters = body.putObject("entityFilters");
@@ -399,38 +399,62 @@ public class RestAtlasAdapter implements AtlasAdapter {
                     sendJson("POST", "/api/atlas/v2/search/basic", objectMapper.writeValueAsString(body));
             if (resp.statusCode() != 200) {
                 throw new AtlasAdapterException(
-                        "Failed to search datasets by status: " + resp.body(), resp.statusCode(), null);
+                        "Failed to search record entities by status: " + resp.body(), resp.statusCode(), null);
             }
             JsonNode root = objectMapper.readTree(resp.body());
-            List<SourcelumeDatasetDto> result = new ArrayList<>();
+            List<RecordEntityDto> result = new ArrayList<>();
             for (JsonNode entity : root.path("entities")) {
-                result.add(toDatasetDto(entity));
+                result.add(toRecordEntityDto(entity));
             }
             return result;
         } catch (IOException e) {
-            throw new AtlasAdapterException("I/O error searching datasets by status: " + e.getMessage(), 500, e);
+            throw new AtlasAdapterException("I/O error searching record entities by status: " + e.getMessage(), 500, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AtlasAdapterException("Interrupted searching datasets by status", 500, e);
+            throw new AtlasAdapterException("Interrupted searching record entities by status", 500, e);
         }
     }
 
     // --- helpers ---
 
+    /** The attributes a basic search must name explicitly per entity type. */
+    private static List<String> attributesFor(String entityType) {
+        List<String> attributes = new ArrayList<>(List.of("qualifiedName", "name", "description"));
+        switch (entityType) {
+            case SourcelumeModelDto.TYPE_NAME -> attributes.addAll(List.of("modelUri", "modelVersion", "disclosure"));
+            default -> attributes.addAll(List.of("sourceUri", "licenseId"));
+        }
+        attributes.addAll(
+                List.of("recordStatus", "rawJsonLd", "validationIssues", "sha256", "validatedBy", "validatedAt"));
+        return attributes;
+    }
+
     /**
-     * Maps one backend entity JSON node onto the DTO, including the ingest
-     * lifecycle fields. A recordStatus the domain does not know is a backend
-     * inconsistency and fails loudly instead of silently mapping to null.
+     * Maps one backend entity JSON node onto the DTO matching its
+     * {@code typeName}, including the ingest lifecycle fields. A
+     * recordStatus the domain does not know is a backend inconsistency
+     * and fails loudly instead of silently mapping to null.
      */
-    private SourcelumeDatasetDto toDatasetDto(JsonNode entity) {
+    private RecordEntityDto toRecordEntityDto(JsonNode entity) {
         JsonNode attrs = entity.path("attributes");
-        SourcelumeDatasetDto dto = new SourcelumeDatasetDto();
+        String typeName = entity.path("typeName").asText(null);
+        RecordEntityDto dto;
+        if (SourcelumeModelDto.TYPE_NAME.equals(typeName)) {
+            SourcelumeModelDto model = new SourcelumeModelDto();
+            model.setModelUri(attrs.path("modelUri").asText(null));
+            model.setModelVersion(attrs.path("modelVersion").asText(null));
+            model.setDisclosure(attrs.path("disclosure").asText(null));
+            dto = model;
+        } else {
+            SourcelumeDatasetDto dataset = new SourcelumeDatasetDto();
+            dataset.setSourceUri(attrs.path("sourceUri").asText(null));
+            dataset.setLicenseId(attrs.path("licenseId").asText(null));
+            dto = dataset;
+        }
         dto.setGuid(entity.path("guid").asText(null));
         dto.setQualifiedName(attrs.path("qualifiedName").asText(null));
         dto.setName(attrs.path("name").asText(null));
         dto.setDescription(attrs.path("description").asText(null));
-        dto.setSourceUri(attrs.path("sourceUri").asText(null));
-        dto.setLicenseId(attrs.path("licenseId").asText(null));
         dto.setRawJsonLd(attrs.path("rawJsonLd").asText(null));
         dto.setSha256(attrs.path("sha256").asText(null));
         dto.setValidatedBy(attrs.path("validatedBy").asText(null));

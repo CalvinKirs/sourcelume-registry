@@ -27,6 +27,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -117,14 +118,16 @@ public class DatasetResource {
                     .entity(new ErrorResponse("Verdict fields are set by the registry; use POST /records"))
                     .build();
         }
-        SourcelumeDatasetDto existing = atlasAdapter.getDatasetByQualifiedName(dataset.getQualifiedName());
+        RecordEntityDto stored =
+                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, dataset.getQualifiedName());
+        SourcelumeDatasetDto existing = stored instanceof SourcelumeDatasetDto ? (SourcelumeDatasetDto) stored : null;
         if (existing != null && existing.getRecordStatus() != null) {
             return Response.status(Response.Status.CONFLICT)
                     .entity(new ErrorResponse("Provenance record can only be changed via POST /records"))
                     .build();
         }
 
-        String guid = atlasAdapter.createOrUpdateDatasetEntity(dataset);
+        String guid = atlasAdapter.createOrUpdateRecordEntity(dataset);
         dataset.setGuid(guid);
         log.info("Persisted dataset entity '{}' (GUID: {})", dataset.getQualifiedName(), guid);
         Response.Status status = existing == null ? Response.Status.CREATED : Response.Status.OK;
@@ -161,7 +164,7 @@ public class DatasetResource {
             @Parameter(description = "The dataset's qualified name", required = true) @QueryParam("qualifiedName")
                     String qualifiedName) {
         if (qualifiedName != null && !qualifiedName.isBlank()) {
-            SourcelumeDatasetDto dto = atlasAdapter.getDatasetByQualifiedName(qualifiedName);
+            SourcelumeDatasetDto dto = getDatasetByQualifiedName(qualifiedName);
             if (dto == null) {
                 return Response.status(Response.Status.NOT_FOUND)
                         .entity(new ErrorResponse("Dataset not found for qualifiedName: " + qualifiedName))
@@ -194,13 +197,15 @@ public class DatasetResource {
                     .entity(new ErrorResponse("guid is required"))
                     .build();
         }
-        SourcelumeDatasetDto dto = atlasAdapter.getDatasetByGuid(guid);
-        if (dto == null) {
+        // A GUID can point at any record entity; the dataset API only
+        // answers for dataset entities.
+        RecordEntityDto stored = atlasAdapter.getRecordEntityByGuid(guid);
+        if (!(stored instanceof SourcelumeDatasetDto)) {
             return Response.status(Response.Status.NOT_FOUND)
                     .entity(new ErrorResponse("Dataset not found for guid: " + guid))
                     .build();
         }
-        return Response.ok(dto).build();
+        return Response.ok(stored).build();
     }
 
     /**
@@ -223,11 +228,11 @@ public class DatasetResource {
                     .entity(new ErrorResponse("qualifiedName is required"))
                     .build();
         }
-        SourcelumeDatasetDto dto = atlasAdapter.getDatasetByQualifiedName(qualifiedName);
+        SourcelumeDatasetDto dto = getDatasetByQualifiedName(qualifiedName);
         if (dto == null && qualifiedName.contains(":/") && !qualifiedName.contains("://")) {
             // Handle URI schemes where HTTP path normalization collapsed '//' to '/'
             String reconstructed = qualifiedName.replaceFirst(":/", "://");
-            dto = atlasAdapter.getDatasetByQualifiedName(reconstructed);
+            dto = getDatasetByQualifiedName(reconstructed);
         }
         if (dto == null) {
             return Response.status(Response.Status.NOT_FOUND)
@@ -235,6 +240,12 @@ public class DatasetResource {
                     .build();
         }
         return Response.ok(dto).build();
+    }
+
+    private SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
+        RecordEntityDto stored =
+                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, qualifiedName);
+        return stored instanceof SourcelumeDatasetDto ? (SourcelumeDatasetDto) stored : null;
     }
 
     /** Wire DTO for error responses; named apart from the ingest API's ErrorResponse in the OpenAPI document. */
