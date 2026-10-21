@@ -26,6 +26,9 @@ github:
   description: "Apache Sourcelume Registry: reference registry for AI training-data provenance records"
   homepage: https://sourcelume.apache.org
 
+  features:
+    issues: true
+
   protected_branches:
     main:
       required_status_checks:
@@ -34,5 +37,6 @@ github:
 
 notifications:
   commits: commits@sourcelume.apache.org
+  issues: issues@sourcelume.apache.org
   pullrequests: dev@sourcelume.apache.org
   jobs: commits@sourcelume.apache.org
