@@ -127,13 +127,50 @@ class TypeDefinitionModelTest {
         }
     }
 
+    @Test
+    void modelEntityCarriesItsAttributesUnderAsset() throws IOException {
+        JsonNode model = modelEntity();
+        // A model is an Asset, not a DataSet — qualifiedName and name come
+        // from Referenceable via Asset, and must not be redeclared.
+        List<String> superTypes = new ArrayList<>();
+        for (JsonNode superType : model.path("superTypes")) {
+            superTypes.add(superType.asText());
+        }
+        assertEquals(List.of("Asset"), superTypes);
+        JsonNode attributes = model.path("attributeDefs");
+        assertFalse(
+                attributes.isArray() && hasAttribute(attributes, "qualifiedName"),
+                "qualifiedName is inherited from Asset and must not be redeclared");
+        assertNotNull(attribute(attributes, "modelUri"));
+        assertNotNull(attribute(attributes, "modelVersion"));
+        assertNotNull(attribute(attributes, "disclosure"));
+        assertNotNull(attribute(attributes, "recordStatus"));
+        assertNotNull(attribute(attributes, "rawJsonLd"));
+        // Same schema-evolution constraint as the dataset type: Atlas
+        // refuses mandatory attributes on existing types, so every
+        // attribute stays optional.
+        for (JsonNode attribute : attributes) {
+            assertTrue(
+                    attribute.path("isOptional").asBoolean(),
+                    attribute.path("name").asText() + " must be optional (Atlas cannot add mandatory attributes)");
+        }
+    }
+
     private JsonNode datasetEntity() throws IOException {
+        return entityDef("sourcelume_dataset");
+    }
+
+    private JsonNode modelEntity() throws IOException {
+        return entityDef("sourcelume_model");
+    }
+
+    private JsonNode entityDef(String name) throws IOException {
         for (JsonNode entity : modelRoot().path("entityDefs")) {
-            if ("sourcelume_dataset".equals(entity.path("name").asText())) {
+            if (name.equals(entity.path("name").asText())) {
                 return entity;
             }
         }
-        throw new AssertionError("entityDef sourcelume_dataset not found");
+        throw new AssertionError("entityDef " + name + " not found");
     }
 
     private JsonNode attribute(JsonNode attributes, String name) {

@@ -17,7 +17,10 @@ repo creation, and initial discussion") the codebase is organized as a
   validation stages ship as separate plugin modules discovered via
   ServiceLoader, wired into the Quarkus runtime (fail-on-start) and exposed
   as a pre-flight `POST /records/validate` endpoint (see
-  [docs/validation.md](docs/validation.md))
+  [docs/validation.md](docs/validation.md)). The spec's record types are
+  supported end to end: `ProvenanceRecord` persists as `sourcelume_dataset`,
+  `TrainingProvenanceRecord` as `sourcelume_model` (see
+  [docs/ingest.md](docs/ingest.md))
 - **CDI-style runtime**, leaning Quarkus (see dev-list thread)
 
 ## Layout
@@ -114,6 +117,9 @@ curl -s http://localhost:8082/api/v1/types/typedefs | jq .
 
 # Inspect the sourcelume_dataset entity definition
 curl -s http://localhost:8082/api/v1/types/dataset | jq .
+
+# Inspect the sourcelume_model entity definition
+curl -s http://localhost:8082/api/v1/types/model | jq .
 ```
 
 ## Examples

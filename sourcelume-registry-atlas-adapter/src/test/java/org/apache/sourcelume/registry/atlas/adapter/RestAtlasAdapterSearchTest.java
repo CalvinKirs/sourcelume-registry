@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.sourcelume.registry.atlas.adapter.config.SourcelumeAtlasProperties;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.exception.AtlasAdapterException;
@@ -72,7 +73,8 @@ class RestAtlasAdapterSearchTest {
                         + entity("guid-1", "VALIDATED", "https://example.org/records/one")
                         + ", " + entity("guid-2", "VALIDATED", "https://example.org/records/two") + "]}");
 
-        List<SourcelumeDatasetDto> found = adapter.findDatasetsByStatus(RecordStatus.VALIDATED, 10);
+        List<RecordEntityDto> found =
+                adapter.findRecordEntitiesByStatus(SourcelumeDatasetDto.TYPE_NAME, RecordStatus.VALIDATED, 10);
 
         assertEquals(2, found.size());
         assertEquals("guid-1", found.get(0).getGuid());
@@ -105,7 +107,8 @@ class RestAtlasAdapterSearchTest {
     void emptySearchResultYieldsAnEmptyList() throws IOException {
         serve(200, "{\"queryType\": \"BASIC\", \"searchParameters\": {}}");
 
-        List<SourcelumeDatasetDto> found = adapter.findDatasetsByStatus(RecordStatus.VALIDATED, 10);
+        List<RecordEntityDto> found =
+                adapter.findRecordEntitiesByStatus(SourcelumeDatasetDto.TYPE_NAME, RecordStatus.VALIDATED, 10);
 
         assertNotNull(found);
         assertTrue(found.isEmpty());
@@ -115,7 +118,9 @@ class RestAtlasAdapterSearchTest {
     void backendErrorFailsLoudly() throws IOException {
         serve(500, "{\"errorMessage\": \"boom\"}");
 
-        assertThrows(AtlasAdapterException.class, () -> adapter.findDatasetsByStatus(RecordStatus.VALIDATED, 10));
+        assertThrows(
+                AtlasAdapterException.class,
+                () -> adapter.findRecordEntitiesByStatus(SourcelumeDatasetDto.TYPE_NAME, RecordStatus.VALIDATED, 10));
     }
 
     @Test
@@ -123,7 +128,8 @@ class RestAtlasAdapterSearchTest {
         // The unique-attribute endpoint answers with AtlasEntityWithExtInfo.
         serve(200, "{\"entity\": " + entity("guid-9", "VALIDATED", "https://example.org/records/nine") + "}");
 
-        SourcelumeDatasetDto dto = adapter.getDatasetByQualifiedName("https://example.org/records/nine");
+        SourcelumeDatasetDto dto = (SourcelumeDatasetDto) adapter.getRecordEntityByQualifiedName(
+                SourcelumeDatasetDto.TYPE_NAME, "https://example.org/records/nine");
 
         assertEquals(RecordStatus.VALIDATED, dto.getRecordStatus());
         assertEquals("guid-9", dto.getGuid());
@@ -137,7 +143,9 @@ class RestAtlasAdapterSearchTest {
         serve(200, "{\"entity\": " + entity("guid-x", "SOMEDAY", "https://example.org/records/x") + "}");
 
         AtlasAdapterException exception = assertThrows(
-                AtlasAdapterException.class, () -> adapter.getDatasetByQualifiedName("https://example.org/records/x"));
+                AtlasAdapterException.class,
+                () -> adapter.getRecordEntityByQualifiedName(
+                        SourcelumeDatasetDto.TYPE_NAME, "https://example.org/records/x"));
         assertTrue(exception.getMessage().contains("SOMEDAY"));
     }
 
@@ -152,7 +160,7 @@ class RestAtlasAdapterSearchTest {
         dto.setRawJsonLd("{\"id\": \"https://example.org/records/one\"}");
         dto.setValidationIssues("[{\"message\": \"m\"}]");
 
-        String guid = adapter.createOrUpdateDatasetEntity(dto);
+        String guid = adapter.createOrUpdateRecordEntity(dto);
 
         assertEquals("guid-1", guid);
         JsonNode attributes = objectMapper

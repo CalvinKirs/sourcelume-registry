@@ -27,8 +27,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.ingest.IngestResult;
 import org.apache.sourcelume.registry.core.validation.ValidatorChain;
@@ -46,6 +48,7 @@ class IngestServiceImplTest {
 
     private static String validRecord;
     private static String invalidRecord;
+    private static String validTrainingRecord;
 
     private final RecordingAtlasAdapter adapter = new RecordingAtlasAdapter();
     private final IngestServiceImpl service =
@@ -55,6 +58,7 @@ class IngestServiceImplTest {
     static void loadFixtures() {
         validRecord = fixture("valid-minimal.jsonld");
         invalidRecord = fixture("invalid-missing-license.jsonld");
+        validTrainingRecord = fixture("it-training-valid.jsonld");
     }
 
     @Test
@@ -68,7 +72,7 @@ class IngestServiceImplTest {
         assertEquals("https://sourcelume.apache.org/records/minimal-example", result.qualifiedName());
         assertTrue(result.validation().conforms());
 
-        SourcelumeDatasetDto upserted = adapter.upserted;
+        SourcelumeDatasetDto upserted = (SourcelumeDatasetDto) adapter.upserted;
         assertEquals(RecordStatus.VALIDATED, upserted.getRecordStatus());
         assertEquals("Minimal example record", upserted.getName());
         assertEquals("https://www.apache.org/licenses/LICENSE-2.0", upserted.getLicenseId());
@@ -103,7 +107,7 @@ class IngestServiceImplTest {
         assertEquals(RecordStatus.INCOMPLETE, result.status());
         assertTrue(!result.validation().conforms());
 
-        SourcelumeDatasetDto upserted = adapter.upserted;
+        SourcelumeDatasetDto upserted = (SourcelumeDatasetDto) adapter.upserted;
         assertEquals(RecordStatus.INCOMPLETE, upserted.getRecordStatus());
         assertEquals("https://sourcelume.apache.org/records/invalid-missing-license", upserted.getQualifiedName());
         assertEquals(invalidRecord, upserted.getRawJsonLd());
@@ -134,6 +138,32 @@ class IngestServiceImplTest {
                 "2026-10-04T12:00:00Z",
                 result.validatedAt(),
                 "the timestamp comes from the injected clock, not the wall clock");
+    }
+
+    /**
+     * A TrainingProvenanceRecord promotes onto the sourcelume_model entity:
+     * modelUri from the record's identifier, plus disclosure and version —
+     * and the trainingData list stays only in the raw document.
+     */
+    @Test
+    void trainingRecordPromotesOntoModelEntity() {
+        SourcelumeModelDto submitted = new SourcelumeModelDto();
+        submitted.setQualifiedName("https://sourcelume.apache.org/records/it-training");
+        submitted.setRawJsonLd(validTrainingRecord);
+        submitted.setSha256(Digests.sha256Hex(validTrainingRecord.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+        IngestResult result = service.process(submitted);
+
+        assertEquals(RecordStatus.VALIDATED, result.status());
+        assertEquals("TrainingProvenanceRecord", result.recordType());
+        SourcelumeModelDto upserted = (SourcelumeModelDto) adapter.upserted;
+        assertEquals(SourcelumeModelDto.TYPE_NAME, upserted.getTypeName());
+        assertEquals(RecordStatus.VALIDATED, upserted.getRecordStatus());
+        assertEquals("IT model", upserted.getName());
+        assertEquals("https://example.org/models/it-model", upserted.getModelUri());
+        assertEquals("v1", upserted.getModelVersion());
+        assertEquals("complete", upserted.getDisclosure());
+        assertEquals(validTrainingRecord, upserted.getRawJsonLd());
     }
 
     @Test
@@ -168,7 +198,7 @@ class IngestServiceImplTest {
     /** In-memory stand-in for the Atlas backend: keeps the last upsert. */
     static class RecordingAtlasAdapter implements AtlasAdapter {
 
-        SourcelumeDatasetDto upserted;
+        RecordEntityDto upserted;
 
         @Override
         public boolean isServerReady() {
@@ -186,18 +216,26 @@ class IngestServiceImplTest {
         }
 
         @Override
-        public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
-            this.upserted = dataset;
-            return dataset.getGuid() != null ? dataset.getGuid() : "guid-1";
+        public String createOrUpdateRecordEntity(RecordEntityDto record) {
+            this.upserted = record;
+            return record.getGuid() != null ? record.getGuid() : "guid-1";
         }
 
         @Override
-        public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
+        public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
             return null;
         }
 
         @Override
-        public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+        public void deleteRecordEntity(String entityType, String qualifiedName) {}
+
+        @Override
+        public RecordEntityDto getRecordEntityByGuid(String guid) {
+            return null;
+        }
+
+        @Override
+        public List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit) {
             return List.of();
         }
     }

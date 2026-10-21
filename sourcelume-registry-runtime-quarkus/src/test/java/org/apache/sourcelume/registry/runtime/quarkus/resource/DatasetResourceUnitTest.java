@@ -21,8 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.function.Consumer;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,12 +54,12 @@ class DatasetResourceUnitTest {
         SourcelumeDatasetDto ds = new SourcelumeDatasetDto();
         ds.setQualifiedName("sourcelume://datasets/test1");
         ds.setName("Test 1");
-        adapter.datasetByQName = ds;
+        adapter.storedByQName = ds;
 
         Response found = resource.getDatasetByQuery("sourcelume://datasets/test1");
         assertEquals(Response.Status.OK.getStatusCode(), found.getStatus());
 
-        adapter.datasetByQName = null;
+        adapter.storedByQName = null;
         Response notFound = resource.getDatasetByQuery("sourcelume://datasets/missing");
         assertEquals(Response.Status.NOT_FOUND.getStatusCode(), notFound.getStatus());
     }
@@ -89,12 +91,12 @@ class DatasetResourceUnitTest {
 
         SourcelumeDatasetDto ds = new SourcelumeDatasetDto();
         ds.setQualifiedName("sourcelume://datasets/test1");
-        adapter.datasetByQName = ds;
+        adapter.storedByQName = ds;
 
         Response foundReconstructed = resource.getDatasetByPath("sourcelume:/datasets/test1");
         assertEquals(Response.Status.OK.getStatusCode(), foundReconstructed.getStatus());
 
-        adapter.datasetByQName = null;
+        adapter.storedByQName = null;
         Response notFound = resource.getDatasetByPath("sourcelume:/datasets/missing");
         assertEquals(Response.Status.NOT_FOUND.getStatusCode(), notFound.getStatus());
     }
@@ -147,7 +149,7 @@ class DatasetResourceUnitTest {
         for (RecordStatus status : RecordStatus.values()) {
             SourcelumeDatasetDto record = plainDataset("https://example.org/records/r1");
             record.setRecordStatus(status);
-            adapter.datasetByQName = record;
+            adapter.storedByQName = record;
 
             Response response = resource.createOrUpdateDataset(plainDataset("https://example.org/records/r1"));
 
@@ -157,8 +159,25 @@ class DatasetResourceUnitTest {
     }
 
     @Test
+    void testCreateOrUpdateDatasetRefusesToShadowARecordOfAnotherType() {
+        // The 409 guard must see records in every store: a plain
+        // dataset written under a model record's id would shadow it,
+        // and GET /records/{id} would answer the shadow.
+        SourcelumeModelDto record = new SourcelumeModelDto();
+        record.setQualifiedName("https://example.org/records/model-r1");
+        record.setName("Model record");
+        record.setRecordStatus(RecordStatus.VALIDATED);
+        adapter.storedByQName = record;
+
+        Response response = resource.createOrUpdateDataset(plainDataset("https://example.org/records/model-r1"));
+
+        assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
+        assertEquals(0, adapter.writes);
+    }
+
+    @Test
     void testCreateOrUpdateDatasetUpdatesExistingPlainDataset() {
-        adapter.datasetByQName = plainDataset("sourcelume://datasets/test");
+        adapter.storedByQName = plainDataset("sourcelume://datasets/test");
 
         Response response = resource.createOrUpdateDataset(plainDataset("sourcelume://datasets/test"));
 
@@ -174,7 +193,7 @@ class DatasetResourceUnitTest {
     }
 
     private static class StubAtlasAdapter implements AtlasAdapter {
-        SourcelumeDatasetDto datasetByQName;
+        RecordEntityDto storedByQName;
         SourcelumeDatasetDto datasetByGuid;
         int writes;
 
@@ -194,26 +213,31 @@ class DatasetResourceUnitTest {
         }
 
         @Override
-        public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
+        public String createOrUpdateRecordEntity(RecordEntityDto record) {
             writes++;
             return "guid-created";
         }
 
         @Override
-        public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
-            if (datasetByQName != null && datasetByQName.getQualifiedName().equals(qualifiedName)) {
-                return datasetByQName;
+        public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
+            if (storedByQName != null
+                    && entityType.equals(storedByQName.getTypeName())
+                    && storedByQName.getQualifiedName().equals(qualifiedName)) {
+                return storedByQName;
             }
             return null;
         }
 
         @Override
-        public SourcelumeDatasetDto getDatasetByGuid(String guid) {
+        public void deleteRecordEntity(String entityType, String qualifiedName) {}
+
+        @Override
+        public RecordEntityDto getRecordEntityByGuid(String guid) {
             return datasetByGuid;
         }
 
         @Override
-        public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+        public List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit) {
             return List.of();
         }
     }

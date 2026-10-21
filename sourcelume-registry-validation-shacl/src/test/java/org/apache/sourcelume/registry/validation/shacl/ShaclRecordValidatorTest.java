@@ -64,6 +64,24 @@ class ShaclRecordValidatorTest {
         assertTrue(result.conforms(), () -> String.valueOf(result.issues()));
     }
 
+    @Test
+    void validTrainingRecordConforms() {
+        ValidationResult result = validator.validate(record("valid-training-minimal.jsonld"));
+        assertTrue(result.conforms(), () -> String.valueOf(result.issues()));
+    }
+
+    /**
+     * The training shape constrains disclosure to its declared values;
+     * a value outside the sh:in list is a violation on the expanded graph.
+     */
+    @Test
+    void trainingRecordDisclosureOutsideShaclInFails() {
+        ValidationResult result = validator.validate(record("invalid-training-disclosure.jsonld"));
+        assertFalse(result.conforms());
+        assertTrue(result.issues().stream()
+                .anyMatch(i -> i.path().contains("disclosure") && i.message().contains("not in expected values")));
+    }
+
     /**
      * The reason this stage exists: an aliased full-IRI property duplicating
      * the license claim passes the JSON Schema stage (additional properties

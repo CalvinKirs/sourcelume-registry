@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -100,7 +101,45 @@ class JsonSchemaRecordValidatorTest {
     void customSchemaResourceThrowsWhenResourceMissing() {
         assertThrows(
                 org.apache.sourcelume.registry.common.exception.SourcelumeException.class,
-                () -> new JsonSchemaRecordValidator("schemas/nonexistent.schema.json"));
+                () -> new JsonSchemaRecordValidator(Map.of("ProvenanceRecord", "schemas/nonexistent.schema.json")));
+    }
+
+    @Test
+    void missingTypeTermFails() {
+        ValidationResult result = validator.validate("{\"id\": \"https://example.org/r/1\"}");
+        assertFalse(result.conforms());
+        assertTrue(result.issues().stream().anyMatch(i -> i.path().equals("/type")));
+    }
+
+    @Test
+    void unknownTypeTermFails() {
+        ValidationResult result =
+                validator.validate("{\"id\": \"https://example.org/r/1\", \"type\": \"SomethingElse\"}");
+        assertFalse(result.conforms());
+        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("SomethingElse")));
+    }
+
+    @Test
+    void trainingRecordValidatesAgainstItsOwnSchema() {
+        ValidationResult result = validator.validate(record("valid-training-minimal.jsonld"));
+        assertTrue(result.conforms());
+    }
+
+    @Test
+    void trainingRecordMissingIdentifierIsRejectedByItsSchema() {
+        ValidationResult result = validator.validate(record("invalid-training-missing-identifier.jsonld"));
+        assertFalse(result.conforms());
+        assertTrue(result.issues().stream().anyMatch(i -> i.message().contains("identifier")));
+    }
+
+    @Test
+    void trainingRecordIsNotJudgedByTheDatasetSchema() {
+        // A ProvenanceRecord is invalid under the training schema and vice
+        // versa; the type term must pick the schema, not "the one schema".
+        String datasetRecord = record("valid-minimal.jsonld");
+        String flipped = datasetRecord.replace("\"ProvenanceRecord\"", "\"TrainingProvenanceRecord\"");
+        ValidationResult result = validator.validate(flipped);
+        assertFalse(result.conforms(), "a dataset record mislabeled as training must fail the training schema");
     }
 
     private static String record(String name) {

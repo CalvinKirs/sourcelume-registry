@@ -31,9 +31,14 @@ import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
+import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
-import org.apache.sourcelume.registry.common.mapper.ProvenanceRecordMapper;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
+import org.apache.sourcelume.registry.common.mapper.RecordJson;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.ingest.IngestResult;
 import org.apache.sourcelume.registry.core.ingest.IngestService;
@@ -111,32 +116,65 @@ public class IngestResource {
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @APIResponse(
             responseCode = "409",
-            description = "The record is already VALIDATED",
+            description = "The record is already VALIDATED, or the id is taken under a different record type",
             content = @Content(schema = @Schema(implementation = ConflictResponse.class)))
     @APIResponse(responseCode = "415", description = "Unsupported content type")
     public Response submit(byte[] received) {
         String rawJsonLd = new String(received, StandardCharsets.UTF_8);
         String recordId;
         try {
-            recordId = ProvenanceRecordMapper.extractRecordId(rawJsonLd);
+            recordId = RecordJson.extractRecordId(rawJsonLd);
         } catch (IllegalArgumentException e) {
             return Response.status(400)
                     .entity(new ErrorResponse(e.getMessage()))
                     .build();
         }
 
-        SourcelumeDatasetDto existing = atlasAdapter.getDatasetByQualifiedName(recordId);
-        if (existing != null && existing.getRecordStatus() == RecordStatus.VALIDATED) {
-            return Response.status(409)
-                    .entity(new ConflictResponse(recordId, existing.getRecordStatus()))
-                    .build();
+        // The record's type term selects its store: ProvenanceRecord →
+        // sourcelume_dataset, TrainingProvenanceRecord → sourcelume_model.
+        // A document without a known type still lands on the dataset
+        // entity — the chain will mark it INCOMPLETE and it stays curatable.
+        String recordTypeTerm = RecordJson.extractRecordType(rawJsonLd).orElse(null);
+        String entityType = RecordType.entityTypeFor(recordTypeTerm);
+
+        // But the id names one record whichever store it landed in, so
+        // the guard looks in every record store: VALIDATED under any
+        // type blocks the submission. An entity under a different type
+        // is either a replaceable INCOMPLETE stub — it carries no
+        // provenance payload, only its failure report, and a stale stub
+        // would keep answering GET /records/{id} over the new entity —
+        // or a conflict this write cannot merge into.
+        List<RecordEntityDto> stored =
+                atlasAdapter.getRecordEntitiesByQualifiedName(RecordType.entityTypeNames(), recordId);
+        RecordEntityDto existing = null;
+        List<RecordEntityDto> replaceableStubs = new ArrayList<>();
+        for (RecordEntityDto entity : stored) {
+            if (entity.getRecordStatus() == RecordStatus.VALIDATED) {
+                return Response.status(409)
+                        .entity(new ConflictResponse(recordId, entity.getRecordStatus()))
+                        .build();
+            }
+            if (entityType.equals(entity.getTypeName())) {
+                existing = entity;
+            } else if (entity.getRecordStatus() == RecordStatus.INCOMPLETE) {
+                replaceableStubs.add(entity);
+            } else {
+                return Response.status(409)
+                        .entity(new ConflictResponse(recordId, entity.getRecordStatus()))
+                        .build();
+            }
+        }
+        for (RecordEntityDto stub : replaceableStubs) {
+            atlasAdapter.deleteRecordEntity(stub.getTypeName(), recordId);
         }
 
         // Inline validation: the same IngestService a queue consumer
         // would call the day a slow validation step makes a real queue
         // worth its price. The record reaches the store only with its
         // verdict.
-        SourcelumeDatasetDto submitted = new SourcelumeDatasetDto();
+        RecordEntityDto submitted = RecordType.fromTypeName(recordTypeTerm)
+                .map(RecordType::newEntity)
+                .orElseGet(SourcelumeDatasetDto::new);
         submitted.setQualifiedName(recordId);
         submitted.setRawJsonLd(rawJsonLd);
         // The digest covers the received bytes, not the decoded string —
@@ -151,7 +189,7 @@ public class IngestResource {
         }
         IngestResult result = ingestService.process(submitted);
 
-        return Response.status(existing == null ? 201 : 200)
+        return Response.status(stored.isEmpty() ? 201 : 200)
                 .location(locationOf(recordId))
                 .entity(IngestResponse.of(result, objectMapper))
                 .build();
@@ -172,13 +210,16 @@ public class IngestResource {
     public Response status(
             @Parameter(description = "The record's id (IRI); encode it when calling the API directly") @PathParam("id")
                     String id) {
-        SourcelumeDatasetDto dataset = atlasAdapter.getDatasetByQualifiedName(id);
-        if (dataset == null) {
+        // The id's owning entity type is discovered, not stored — check
+        // each record type's store until one answers.
+        List<RecordEntityDto> found = atlasAdapter.getRecordEntitiesByQualifiedName(RecordType.entityTypeNames(), id);
+        RecordEntityDto stored = found.isEmpty() ? null : found.get(0);
+        if (stored == null) {
             return Response.status(404)
                     .entity(new ErrorResponse("No record for id: " + id))
                     .build();
         }
-        return Response.ok(RecordResponse.of(dataset)).build();
+        return Response.ok(RecordResponse.of(stored)).build();
     }
 
     /**
@@ -220,6 +261,7 @@ public class IngestResource {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record IngestResponse(
             String qualifiedName,
+            String type,
             RecordStatus recordStatus,
             String validationIssues,
             String sha256,
@@ -231,6 +273,7 @@ public class IngestResource {
                     result.validation().issues().isEmpty() ? null : toIssuesJson(result.validation(), objectMapper);
             return new IngestResponse(
                     result.qualifiedName(),
+                    result.recordType(),
                     result.status(),
                     issues,
                     result.sha256(),
@@ -258,30 +301,54 @@ public class IngestResource {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RecordResponse(
             String qualifiedName,
+            String type,
             RecordStatus recordStatus,
             String name,
             String licenseId,
             String sourceUri,
+            String modelUri,
+            String modelVersion,
+            String disclosure,
             String validationIssues,
             String sha256,
             String validatedBy,
             String validatedAt) {
 
-        static RecordResponse of(SourcelumeDatasetDto dataset) {
-            String issues = dataset.getValidationIssues();
-            if (SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES.equals(issues)) {
+        static RecordResponse of(RecordEntityDto record) {
+            String issues = record.getValidationIssues();
+            if (RecordEntityDto.CLEARED_VALIDATION_ISSUES.equals(issues)) {
                 issues = null;
             }
+            String recordType = RecordType.fromEntityTypeName(record.getTypeName())
+                    .map(RecordType::typeName)
+                    .orElse(record.getTypeName());
+            String licenseId = null;
+            String sourceUri = null;
+            String modelUri = null;
+            String modelVersion = null;
+            String disclosure = null;
+            if (record instanceof SourcelumeDatasetDto dataset) {
+                licenseId = dataset.getLicenseId();
+                sourceUri = dataset.getSourceUri();
+            } else if (record instanceof SourcelumeModelDto model) {
+                modelUri = model.getModelUri();
+                modelVersion = model.getModelVersion();
+                disclosure = model.getDisclosure();
+            }
             return new RecordResponse(
-                    dataset.getQualifiedName(),
-                    dataset.getRecordStatus(),
-                    dataset.getName(),
-                    dataset.getLicenseId(),
-                    dataset.getSourceUri(),
+                    record.getQualifiedName(),
+                    recordType,
+                    record.getRecordStatus(),
+                    record.getName(),
+                    licenseId,
+                    sourceUri,
+                    modelUri,
+                    modelVersion,
+                    disclosure,
                     issues,
-                    dataset.getSha256(),
-                    dataset.getValidatedBy(),
-                    dataset.getValidatedAt());
+                    record.getSha256(),
+                    record.getValidatedBy(),
+                    record.getValidatedAt());
         }
     }
 

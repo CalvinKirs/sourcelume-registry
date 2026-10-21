@@ -40,6 +40,8 @@ components:
       properties:
         qualifiedName:
           type: string
+        type:
+          type: string
         recordStatus:
           $ref: "#/components/schemas/RecordStatus"
         validationIssues:
@@ -66,6 +68,8 @@ components:
       properties:
         qualifiedName:
           type: string
+        type:
+          type: string
         recordStatus:
           $ref: "#/components/schemas/RecordStatus"
         name:
@@ -73,6 +77,12 @@ components:
         licenseId:
           type: string
         sourceUri:
+          type: string
+        modelUri:
+          type: string
+        modelVersion:
+          type: string
+        disclosure:
           type: string
         validationIssues:
           type: string
@@ -99,10 +109,6 @@ components:
           type: string
         description:
           type: string
-        sourceUri:
-          type: string
-        licenseId:
-          type: string
         guid:
           type: string
         recordStatus:
@@ -116,6 +122,12 @@ components:
         validatedBy:
           type: string
         validatedAt:
+          type: string
+        sourceUri:
+          type: string
+        licenseId:
+          type: string
+        typeName:
           type: string
     ValidationResponse:
       type: object
@@ -265,6 +277,19 @@ paths:
             application/json:
               schema:
                 type: object
+  /api/v1/types/model:
+    get:
+      summary: Get the model entity definition
+      tags:
+      - Types
+      responses:
+        "200":
+          description: "The sourcelume_model entity definition and the enums its attributes\
+            \ use, in the typedefs format"
+          content:
+            application/json:
+              schema:
+                type: object
   /api/v1/types/typedefs:
     get:
       summary: Get the Sourcelume typedefs
@@ -321,7 +346,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: The record is already VALIDATED
+          description: "The record is already VALIDATED, or the id is taken under\
+            \ a different record type"
           content:
             application/json:
               schema:

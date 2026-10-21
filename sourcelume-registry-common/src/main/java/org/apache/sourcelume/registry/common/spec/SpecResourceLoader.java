@@ -33,8 +33,12 @@ public final class SpecResourceLoader {
     /** The one context IRI a record may reference (see spec/0.0.1, JSON-LD context). */
     public static final String CANONICAL_CONTEXT_IRI = "https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld";
 
+    /** The stable term namespace the context maps {@code sl:} to (not versioned — the context URL is). */
+    public static final String SOURCELUME_NAMESPACE = "https://sourcelume.apache.org/ns#";
+
     public static final String DEFAULT_CONTEXT_RESOURCE = "context/0.0.1/sourcelume.jsonld";
     public static final String DEFAULT_SCHEMA_RESOURCE = "schema/0.0.1/sourcelume.schema.json";
+    public static final String TRAINING_SCHEMA_RESOURCE = "schema/0.0.1/sourcelume-training.schema.json";
     public static final String DEFAULT_SHACL_RESOURCE = "schema/0.0.1/sourcelume.shacl.ttl";
 
     private SpecResourceLoader() {}

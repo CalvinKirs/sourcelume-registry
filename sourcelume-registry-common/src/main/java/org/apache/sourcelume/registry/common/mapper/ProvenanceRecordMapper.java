@@ -17,7 +17,6 @@
 package org.apache.sourcelume.registry.common.mapper;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.sourcelume.registry.common.dto.ProvenanceRecordDto;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
@@ -59,28 +58,16 @@ public final class ProvenanceRecordMapper {
 
     /**
      * Extracts the record IRI ({@code id}) from a raw document without
-     * requiring any other field to be present. The ingest API uses this to
-     * key the submission before validation runs — a document without an
-     * {@code id} cannot be stored and is rejected up front.
+     * requiring any other field to be present. Delegates to
+     * {@link RecordJson#extractRecordId(String)} — the record IRI is
+     * type-agnostic.
      *
      * @param rawJsonLd the raw JSON-LD document
      * @return the record IRI, never null or blank
      * @throws IllegalArgumentException if the document is not parseable JSON or carries no usable {@code id}
      */
     public static String extractRecordId(String rawJsonLd) {
-        requireText(rawJsonLd, "rawJsonLd");
-        JsonNode root;
-        try {
-            root = OBJECT_MAPPER.readTree(rawJsonLd);
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Record is not parseable JSON: " + e.getOriginalMessage());
-        }
-        JsonNode id = root.path("id");
-        if (!id.isTextual() || id.asText().isBlank()) {
-            throw new IllegalArgumentException(
-                    "Record carries no usable 'id' — the record IRI is required to store a record");
-        }
-        return id.asText();
+        return RecordJson.extractRecordId(rawJsonLd);
     }
 
     /**

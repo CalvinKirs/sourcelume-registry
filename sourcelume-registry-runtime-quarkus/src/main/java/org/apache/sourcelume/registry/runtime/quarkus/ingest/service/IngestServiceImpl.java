@@ -26,9 +26,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
+import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.common.mapper.ProvenanceRecordMapper;
+import org.apache.sourcelume.registry.common.mapper.RecordJson;
+import org.apache.sourcelume.registry.common.mapper.TrainingProvenanceRecordMapper;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.ingest.IngestResult;
 import org.apache.sourcelume.registry.core.ingest.IngestService;
@@ -43,6 +48,12 @@ import org.apache.sourcelume.registry.core.validation.ValidatorChain;
  * REST resource today — and it is the same method a queue consumer would
  * call the day a slow validation step (attestation, and only then a real
  * queue) makes asynchronous processing worth its price.
+ *
+ * <p>The record's own {@code type} term selects the entity type it is
+ * stored under: {@code ProvenanceRecord} → {@code sourcelume_dataset},
+ * {@code TrainingProvenanceRecord} → {@code sourcelume_model}. A document
+ * carrying no known type still lands on the dataset entity — its verdict
+ * is INCOMPLETE anyway, and the failure stays curatable.
  */
 @ApplicationScoped
 public class IngestServiceImpl implements IngestService {
@@ -66,17 +77,20 @@ public class IngestServiceImpl implements IngestService {
     }
 
     @Override
-    public IngestResult process(SourcelumeDatasetDto submitted) {
+    public IngestResult process(RecordEntityDto submitted) {
         Objects.requireNonNull(submitted, "submitted");
 
+        String recordType =
+                RecordJson.extractRecordType(submitted.getRawJsonLd()).orElse(null);
         ValidationResult validation = validatorChain.validate(submitted.getRawJsonLd());
-        SourcelumeDatasetDto verdict =
+        RecordEntityDto verdict =
                 validation.conforms() ? promoteToValidated(submitted) : markIncomplete(submitted, validation);
         stampVerdictContext(verdict, submitted);
 
-        atlasAdapter.createOrUpdateDatasetEntity(verdict);
+        atlasAdapter.createOrUpdateRecordEntity(verdict);
         return new IngestResult(
                 verdict.getQualifiedName(),
+                recordType,
                 verdict.getRecordStatus(),
                 validation,
                 verdict.getSha256(),
@@ -84,26 +98,39 @@ public class IngestServiceImpl implements IngestService {
                 verdict.getValidatedAt());
     }
 
-    private SourcelumeDatasetDto promoteToValidated(SourcelumeDatasetDto submitted) {
+    private RecordEntityDto promoteToValidated(RecordEntityDto submitted) {
         // Conforms → the record parses and satisfies schema and shapes, so
-        // the mapped provenance attributes (name, licenseId, sourceUri) are
-        // safe to write. qualifiedName comes from the record's own id.
-        SourcelumeDatasetDto verdict =
-                ProvenanceRecordMapper.toDatasetEntity(ProvenanceRecordMapper.map(submitted.getRawJsonLd()));
+        // the mapped provenance attributes are safe to write — under the
+        // entity type the record's own type term selects. qualifiedName
+        // comes from the record's own id.
+        String rawJsonLd = submitted.getRawJsonLd();
+        RecordType recordType = RecordType.fromTypeName(
+                        RecordJson.extractRecordType(rawJsonLd).orElse(null))
+                .orElse(RecordType.PROVENANCE_RECORD);
+        RecordEntityDto verdict =
+                switch (recordType) {
+                    case PROVENANCE_RECORD ->
+                        ProvenanceRecordMapper.toDatasetEntity(ProvenanceRecordMapper.map(rawJsonLd));
+                    case TRAINING_PROVENANCE_RECORD ->
+                        TrainingProvenanceRecordMapper.toModelEntity(TrainingProvenanceRecordMapper.map(rawJsonLd));
+                };
         verdict.setGuid(submitted.getGuid());
         verdict.setRecordStatus(RecordStatus.VALIDATED);
-        verdict.setRawJsonLd(submitted.getRawJsonLd());
+        verdict.setRawJsonLd(rawJsonLd);
         // Explicit clear — see CLEARED_VALIDATION_ISSUES. A resubmitted
         // record previously stored its failure report, and the Atlas
         // upsert merges attributes: an absent attribute keeps its value.
-        verdict.setValidationIssues(SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES);
+        verdict.setValidationIssues(RecordEntityDto.CLEARED_VALIDATION_ISSUES);
         return verdict;
     }
 
-    private SourcelumeDatasetDto markIncomplete(SourcelumeDatasetDto submitted, ValidationResult validation) {
+    private RecordEntityDto markIncomplete(RecordEntityDto submitted, ValidationResult validation) {
         // Does not conform → the record may lack fields the entity mapping
-        // needs, so nothing is mapped; only the lifecycle verdict is stored.
-        SourcelumeDatasetDto incomplete = new SourcelumeDatasetDto();
+        // needs, so nothing is mapped; only the lifecycle verdict is stored
+        // — on the entity type the submission carries, same as a conforming
+        // record would get.
+        RecordEntityDto incomplete =
+                submitted instanceof SourcelumeModelDto ? new SourcelumeModelDto() : new SourcelumeDatasetDto();
         incomplete.setQualifiedName(submitted.getQualifiedName());
         incomplete.setGuid(submitted.getGuid());
         // Atlas requires a name on every entity write (mandatory on the
@@ -121,7 +148,7 @@ public class IngestServiceImpl implements IngestService {
      * bytes), which chain judged it, and when. Without it a stored verdict
      * loses its meaning as the spec and the chain evolve.
      */
-    private void stampVerdictContext(SourcelumeDatasetDto verdict, SourcelumeDatasetDto submitted) {
+    private void stampVerdictContext(RecordEntityDto verdict, RecordEntityDto submitted) {
         verdict.setSha256(submitted.getSha256());
         verdict.setValidatedBy(
                 validatorChain.validators().stream().map(RecordValidator::id).collect(Collectors.joining(",")));

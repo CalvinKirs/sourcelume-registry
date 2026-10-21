@@ -16,9 +16,10 @@
  */
 package org.apache.sourcelume.registry.core;
 
+import java.util.ArrayList;
 import java.util.List;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
-import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 
 /**
  * Backend-neutral adapter isolating Atlas (or any provenance-graph backend) operations
@@ -68,41 +69,85 @@ public interface AtlasAdapter {
     }
 
     /**
-     * Creates or updates a dataset entity in the backend.
+     * Creates or updates a record entity in the backend. The entity's own
+     * {@link RecordEntityDto#getTypeName() typeName} decides which entity
+     * type it is written under (dataset, model, ...), so a DTO can never
+     * be persisted under the wrong type.
      *
-     * @param dataset the dataset to persist
+     * @param entity the record entity to persist
      * @return the backend-assigned identifier (e.g. GUID) for the entity
      */
-    String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset);
+    String createOrUpdateRecordEntity(RecordEntityDto entity);
 
     /**
-     * Retrieves a dataset by its qualified name, or {@code null} if not found.
+     * Retrieves a record entity of the given type by its qualified name,
+     * or {@code null} if not found.
      *
+     * @param entityType   the backend entity type (e.g. {@code sourcelume_dataset})
      * @param qualifiedName the qualified name to look up
-     * @return the dataset DTO, or null
+     * @return the entity DTO, or null
      */
-    SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName);
+    RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName);
 
     /**
-     * Retrieves a dataset by its Atlas GUID, or {@code null} if not found.
+     * Retrieves every record entity stored for the qualified name across the
+     * given entity types, in the order given. An id names one record
+     * whichever record store it landed in, so guards must look everywhere —
+     * a lookup that checks only the store a submission targets stays blind
+     * to a sibling store's copy of the same id.
+     *
+     * @param entityTypes   the entity types to search, in order
+     * @param qualifiedName the qualified name to look up
+     * @return the entities found for the id, never null
+     */
+    default List<RecordEntityDto> getRecordEntitiesByQualifiedName(List<String> entityTypes, String qualifiedName) {
+        List<RecordEntityDto> found = new ArrayList<>();
+        for (String entityType : entityTypes) {
+            RecordEntityDto entity = getRecordEntityByQualifiedName(entityType, qualifiedName);
+            if (entity != null) {
+                found.add(entity);
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Deletes the record entity stored under the given type and qualified
+     * name. The ingest guard uses it to replace an INCOMPLETE stub that sits
+     * in a different record store than the resubmission targets — a stub
+     * carries no provenance payload, only its failure report, so deleting it
+     * loses nothing. Backends that soft-delete (Atlas marks entities
+     * DELETED) leave the registry's lookups blind to the removed stub, which
+     * is exactly what the replacement needs.
+     *
+     * @param entityType    the backend entity type the entity is stored under
+     * @param qualifiedName the qualified name of the entity to delete
+     */
+    void deleteRecordEntity(String entityType, String qualifiedName);
+
+    /**
+     * Retrieves a record entity by its backend GUID, or {@code null} if
+     * not found. GUIDs are unique across entity types, so the returned
+     * DTO's concrete type follows the stored entity's typeName.
      *
      * @param guid the unique entity GUID to look up
-     * @return the dataset DTO, or null
+     * @return the entity DTO, or null
      */
-    default SourcelumeDatasetDto getDatasetByGuid(String guid) {
+    default RecordEntityDto getRecordEntityByGuid(String guid) {
         return null;
     }
 
     /**
-     * Returns the datasets currently in the given record status — the
-     * search consumers use to filter on VALIDATED records. Implementations
-     * never return null; an empty list means nothing matches.
+     * Returns the entities of the given type currently in the given record
+     * status — the search consumers use to filter on VALIDATED records.
+     * Implementations never return null; an empty list means nothing matches.
      *
+     * @param entityType the backend entity type to search (e.g. {@code sourcelume_dataset})
      * @param status the record status to look for
-     * @param limit  the maximum number of datasets to return
-     * @return the datasets in the given status, at most {@code limit}, never null
+     * @param limit  the maximum number of entities to return
+     * @return the entities in the given status, at most {@code limit}, never null
      */
-    List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit);
+    List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit);
 
     /**
      * Backend-neutral holder for a parsed type definition model. The Atlas

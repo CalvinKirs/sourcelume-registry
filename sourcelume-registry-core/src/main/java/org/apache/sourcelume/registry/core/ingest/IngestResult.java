@@ -21,10 +21,11 @@ import org.apache.sourcelume.registry.core.validation.ValidationResult;
 
 /**
  * The outcome of one record's run through the ingest pipeline: which
- * record (by qualified name), which {@link RecordStatus} it ended up in,
- * the full {@link ValidationResult} that led there, and the verdict's
- * context — the SHA-256 of the received bytes, the validator chain that
- * judged the record, and when.
+ * record (by qualified name), which record type it claimed (the
+ * {@code type} term, null when the document carries none), which
+ * {@link RecordStatus} it ended up in, the full {@link ValidationResult}
+ * that led there, and the verdict's context — the SHA-256 of the received
+ * bytes, the validator chain that judged the record, and when.
  *
  * <p>The result carries the issues as data instead of throwing — an
  * INCOMPLETE record is a normal, expected outcome of curation, not an
@@ -32,6 +33,7 @@ import org.apache.sourcelume.registry.core.validation.ValidationResult;
  */
 public record IngestResult(
         String qualifiedName,
+        String recordType,
         RecordStatus status,
         ValidationResult validation,
         String sha256,

@@ -25,6 +25,7 @@ import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.junit.jupiter.api.Test;
 
@@ -125,7 +126,7 @@ class DatasetResourceTest {
         record.setName("Locked record");
         record.setLicenseId("https://spdx.org/licenses/Apache-2.0.html");
         record.setRecordStatus(RecordStatus.VALIDATED);
-        atlasAdapter.createOrUpdateDatasetEntity(record);
+        atlasAdapter.createOrUpdateRecordEntity(record);
 
         // 1. Forged verdict
         given().contentType(ContentType.JSON)
@@ -154,6 +155,35 @@ class DatasetResourceTest {
                 .statusCode(200)
                 .body("name", equalTo("Locked record"))
                 .body("licenseId", equalTo("https://spdx.org/licenses/Apache-2.0.html"))
+                .body("recordStatus", equalTo("VALIDATED"));
+    }
+
+    @Test
+    void shouldNotShadowARecordOfAnotherType() {
+        // The 409 guard must see records in every store: a dataset
+        // entity written under a model record's id would shadow it, and
+        // GET /records/{id} would answer the plain dataset.
+        String recordId = "https://example.org/records/locked-model";
+        SourcelumeModelDto record = new SourcelumeModelDto();
+        record.setQualifiedName(recordId);
+        record.setName("Locked model record");
+        record.setRecordStatus(RecordStatus.VALIDATED);
+        atlasAdapter.createOrUpdateRecordEntity(record);
+
+        given().contentType(ContentType.JSON)
+                .body("{\"qualifiedName\": \"" + recordId + "\", \"name\": \"tampered\"}")
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(409);
+
+        // The record's status view still answers the model record.
+        given().urlEncodingEnabled(false)
+                .when()
+                .get("/records/" + java.net.URLEncoder.encode(recordId, java.nio.charset.StandardCharsets.UTF_8))
+                .then()
+                .statusCode(200)
+                .body("type", equalTo("TrainingProvenanceRecord"))
                 .body("recordStatus", equalTo("VALIDATED"));
     }
 

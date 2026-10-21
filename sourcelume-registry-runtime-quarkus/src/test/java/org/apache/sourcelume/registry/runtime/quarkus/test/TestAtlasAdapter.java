@@ -23,16 +23,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
-import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 
 @Mock
 @ApplicationScoped
 public class TestAtlasAdapter implements AtlasAdapter {
 
-    private final Map<String, SourcelumeDatasetDto> byQualifiedName = new ConcurrentHashMap<>();
-    private final Map<String, SourcelumeDatasetDto> byGuid = new ConcurrentHashMap<>();
+    /** Atlas keys entities by (type, qualifiedName) — so does the fake, or cross-type collisions stay invisible. */
+    private record StoreKey(String entityType, String qualifiedName) {}
+
+    private final Map<StoreKey, RecordEntityDto> byQualifiedName = new ConcurrentHashMap<>();
+    private final Map<String, RecordEntityDto> byGuid = new ConcurrentHashMap<>();
 
     @Override
     public boolean isServerReady() {
@@ -58,31 +61,40 @@ public class TestAtlasAdapter implements AtlasAdapter {
     }
 
     @Override
-    public String createOrUpdateDatasetEntity(SourcelumeDatasetDto dataset) {
-        SourcelumeDatasetDto existing = byQualifiedName.get(dataset.getQualifiedName());
-        String guid = dataset.getGuid() != null
-                ? dataset.getGuid()
+    public String createOrUpdateRecordEntity(RecordEntityDto record) {
+        StoreKey key = new StoreKey(record.getTypeName(), record.getQualifiedName());
+        RecordEntityDto existing = byQualifiedName.get(key);
+        String guid = record.getGuid() != null
+                ? record.getGuid()
                 : existing != null ? existing.getGuid() : UUID.randomUUID().toString();
-        dataset.setGuid(guid);
-        byQualifiedName.put(dataset.getQualifiedName(), dataset);
-        byGuid.put(guid, dataset);
+        record.setGuid(guid);
+        byQualifiedName.put(key, record);
+        byGuid.put(guid, record);
         return guid;
     }
 
     @Override
-    public SourcelumeDatasetDto getDatasetByQualifiedName(String qualifiedName) {
-        return byQualifiedName.get(qualifiedName);
+    public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
+        return byQualifiedName.get(new StoreKey(entityType, qualifiedName));
     }
 
     @Override
-    public SourcelumeDatasetDto getDatasetByGuid(String guid) {
+    public void deleteRecordEntity(String entityType, String qualifiedName) {
+        RecordEntityDto removed = byQualifiedName.remove(new StoreKey(entityType, qualifiedName));
+        if (removed != null && removed.getGuid() != null) {
+            byGuid.remove(removed.getGuid());
+        }
+    }
+
+    @Override
+    public RecordEntityDto getRecordEntityByGuid(String guid) {
         return byGuid.get(guid);
     }
 
     @Override
-    public List<SourcelumeDatasetDto> findDatasetsByStatus(RecordStatus status, int limit) {
+    public List<RecordEntityDto> findRecordEntitiesByStatus(String entityType, RecordStatus status, int limit) {
         return byQualifiedName.values().stream()
-                .filter(d -> d.getRecordStatus() == status)
+                .filter(d -> entityType.equals(d.getTypeName()) && d.getRecordStatus() == status)
                 .limit(limit)
                 .toList();
     }

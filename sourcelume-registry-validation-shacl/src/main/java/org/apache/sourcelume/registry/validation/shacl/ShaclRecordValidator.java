@@ -69,13 +69,20 @@ public final class ShaclRecordValidator implements RecordValidator {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
-     * The class the SHACL shapes target. Kept in sync with the spec context
-     * (which maps "ProvenanceRecord" to this IRI): after expansion, a graph
-     * without a node of this type would trivially conform to the shapes -
-     * for example when an inline context redefines the "type" term mapping.
-     * Such graphs are refused instead (see validate).
+     * The classes the SHACL shapes target — one per record type
+     * (ProvenanceRecord, TrainingProvenanceRecord). Kept in sync with the
+     * spec context (which maps each type term to these IRIs): after
+     * expansion, a graph without a node of any known record type would
+     * trivially conform to the shapes - for example when an inline context
+     * redefines the "type" term mapping. Such graphs are refused instead
+     * (see validate).
      */
     static final String PROVENANCE_RECORD_CLASS = "https://sourcelume.apache.org/ns#ProvenanceRecord";
+
+    static final String TRAINING_PROVENANCE_RECORD_CLASS = "https://sourcelume.apache.org/ns#TrainingProvenanceRecord";
+
+    /** The class IRIs a document's graph must contain at least one of for the shapes to have a focus node. */
+    static final List<String> KNOWN_RECORD_CLASSES = List.of(PROVENANCE_RECORD_CLASS, TRAINING_PROVENANCE_RECORD_CLASS);
 
     private final Shapes shapes;
     private final JsonLdContextInliner contextInliner;
@@ -156,16 +163,24 @@ public final class ShaclRecordValidator implements RecordValidator {
                     List.of(ValidationIssue.violation(ID, "/", "Not valid JSON-LD: " + e.getMessage())));
         }
 
-        // Trivial-conformance guard: the shapes target sl:ProvenanceRecord
-        // nodes; a document whose context games (empty inline context,
-        // overridden "type" mapping) expand to no such node and would
-        // conform vacuously. Refuse instead of validating an empty focus set.
-        if (!graph.contains(Node.ANY, RDF.type.asNode(), NodeFactory.createURI(PROVENANCE_RECORD_CLASS))) {
+        // Trivial-conformance guard: the shapes target known record-type
+        // nodes (sl:ProvenanceRecord, sl:TrainingProvenanceRecord); a
+        // document whose context games (empty inline context, overridden
+        // "type" mapping) expand to no such node and would conform
+        // vacuously. Refuse instead of validating an empty focus set.
+        boolean hasRecordNode = false;
+        for (String recordClass : KNOWN_RECORD_CLASSES) {
+            if (graph.contains(Node.ANY, RDF.type.asNode(), NodeFactory.createURI(recordClass))) {
+                hasRecordNode = true;
+                break;
+            }
+        }
+        if (!hasRecordNode) {
             return ValidationResult.failed(List.of(ValidationIssue.violation(
                     ID,
                     "/@type",
-                    "Document expands to no node of type " + PROVENANCE_RECORD_CLASS
-                            + "; SHACL validation would trivially conform")));
+                    "Document expands to no node of a known record type (" + String.join(", ", KNOWN_RECORD_CLASSES)
+                            + "); SHACL validation would trivially conform")));
         }
 
         ValidationReport report = ShaclValidator.get().validate(shapes, graph);
