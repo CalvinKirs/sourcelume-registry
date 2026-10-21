@@ -27,7 +27,9 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.util.List;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
+import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -118,13 +120,23 @@ public class DatasetResource {
                     .entity(new ErrorResponse("Verdict fields are set by the registry; use POST /records"))
                     .build();
         }
-        RecordEntityDto stored =
-                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, dataset.getQualifiedName());
-        SourcelumeDatasetDto existing = stored instanceof SourcelumeDatasetDto ? (SourcelumeDatasetDto) stored : null;
-        if (existing != null && existing.getRecordStatus() != null) {
-            return Response.status(Response.Status.CONFLICT)
-                    .entity(new ErrorResponse("Provenance record can only be changed via POST /records"))
-                    .build();
+        // A provenance record can only be changed via POST /records —
+        // under any record type. Checking only the dataset store would
+        // let a plain dataset shadow a model record's id, and
+        // GET /records/{id} would then answer the shadow instead of the
+        // record.
+        List<RecordEntityDto> stored =
+                atlasAdapter.getRecordEntitiesByQualifiedName(RecordType.entityTypeNames(), dataset.getQualifiedName());
+        SourcelumeDatasetDto existing = null;
+        for (RecordEntityDto entity : stored) {
+            if (entity.getRecordStatus() != null) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(new ErrorResponse("Provenance record can only be changed via POST /records"))
+                        .build();
+            }
+            if (entity instanceof SourcelumeDatasetDto datasetEntity) {
+                existing = datasetEntity;
+            }
         }
 
         String guid = atlasAdapter.createOrUpdateRecordEntity(dataset);

@@ -227,6 +227,9 @@ class IngestServiceImplTest {
         }
 
         @Override
+        public void deleteRecordEntity(String entityType, String qualifiedName) {}
+
+        @Override
         public RecordEntityDto getRecordEntityByGuid(String guid) {
             return null;
         }

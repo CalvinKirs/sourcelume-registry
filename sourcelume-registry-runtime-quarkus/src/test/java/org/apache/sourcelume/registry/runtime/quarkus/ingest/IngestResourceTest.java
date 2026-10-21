@@ -23,10 +23,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
+import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.apache.sourcelume.registry.core.validation.ValidatorChain;
 import org.apache.sourcelume.registry.runtime.quarkus.ingest.service.IngestServiceImpl;
@@ -64,6 +68,12 @@ class IngestResourceTest {
     private static final String INVALID_RECORD =
             VALID_RECORD.replace("\"license\": \"https://www.apache.org/licenses/LICENSE-2.0\",", "");
 
+    /** The same record without its {@code type} term — lands as an INCOMPLETE stub on the dataset entity. */
+    private static final String TYPELESS_RECORD = VALID_RECORD.replace("\"type\": \"ProvenanceRecord\",", "");
+
+    /** A conforming TrainingProvenanceRecord fixture, its id rewritten to this test's record id. */
+    private static final String TRAINING_RECORD = trainingRecord();
+
     private final FakeAtlasAdapter fake = new FakeAtlasAdapter();
     private final IngestResource resource = new IngestResource(
             fake, new IngestServiceImpl(ValidatorChain.discover(), fake, new ObjectMapper()), new ObjectMapper());
@@ -94,7 +104,7 @@ class IngestResourceTest {
         assertTrue(body.validatedBy().contains("json"), "the chain ids are reported");
         assertNotNull(body.validatedAt(), "the verdict carries its timestamp");
 
-        SourcelumeDatasetDto stored = (SourcelumeDatasetDto) fake.store.get(RECORD_ID);
+        SourcelumeDatasetDto stored = storedDataset();
         assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
         assertEquals("Ingest endpoint test record", stored.getName(), "the mapped name replaces the placeholder");
         assertEquals("https://www.apache.org/licenses/LICENSE-2.0", stored.getLicenseId());
@@ -113,7 +123,7 @@ class IngestResourceTest {
                 body.validationIssues().toLowerCase().contains("license"),
                 "the issues come with the response — no polling needed");
 
-        SourcelumeDatasetDto stored = (SourcelumeDatasetDto) fake.store.get(RECORD_ID);
+        SourcelumeDatasetDto stored = storedDataset();
         assertEquals(RecordStatus.INCOMPLETE, stored.getRecordStatus());
         assertEquals(
                 "ingest-test",
@@ -128,7 +138,7 @@ class IngestResourceTest {
     @Test
     void correctedResubmissionOfAnIncompleteRecordAnswersWithItsVerdict() {
         resource.submit(INVALID_RECORD.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        fake.store.get(RECORD_ID).setValidationIssues("[{\"message\": \"missing license\"}]");
+        storedDataset().setValidationIssues("[{\"message\": \"missing license\"}]");
 
         var response = resource.submit(VALID_RECORD.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
@@ -137,12 +147,62 @@ class IngestResourceTest {
         assertEquals(RecordStatus.VALIDATED, body.recordStatus());
         assertNull(body.validationIssues(), "the old failure report does not surface");
 
-        SourcelumeDatasetDto stored = (SourcelumeDatasetDto) fake.store.get(RECORD_ID);
+        SourcelumeDatasetDto stored = storedDataset();
         assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
         assertEquals(
                 SourcelumeDatasetDto.CLEARED_VALIDATION_ISSUES,
                 stored.getValidationIssues(),
                 "the resubmission explicitly clears the old issues — see CLEARED_VALIDATION_ISSUES");
+    }
+
+    /**
+     * The id names one record whichever store the first submission landed
+     * in: an INCOMPLETE stub left under the dataset type is deleted when
+     * the resubmission arrives as a TrainingProvenanceRecord — it may not
+     * stay behind shadowing {@code GET /records/{id}} with a stale verdict.
+     */
+    @Test
+    void resubmittingAnIncompleteStubUnderAnotherTypeReplacesIt() {
+        var first = resource.submit(TYPELESS_RECORD.getBytes(StandardCharsets.UTF_8));
+        assertEquals(RecordStatus.INCOMPLETE, ((IngestResource.IngestResponse) first.getEntity()).recordStatus());
+
+        var response = resource.submit(TRAINING_RECORD.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(200, response.getStatus());
+        IngestResource.IngestResponse body = (IngestResource.IngestResponse) response.getEntity();
+        assertEquals(RecordStatus.VALIDATED, body.recordStatus());
+
+        assertNull(
+                fake.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, RECORD_ID),
+                "the stale dataset stub must be deleted, not shadowed");
+        assertNotNull(
+                fake.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, RECORD_ID),
+                "the resubmission lands on the model entity");
+
+        var status = resource.status(RECORD_ID);
+        IngestResource.RecordResponse statusBody = (IngestResource.RecordResponse) status.getEntity();
+        assertEquals(RecordStatus.VALIDATED, statusBody.recordStatus());
+        assertEquals("TrainingProvenanceRecord", statusBody.type());
+    }
+
+    /**
+     * A TrainingProvenanceRecord under the IRI of a VALIDATED dataset
+     * record is a conflict — one IRI may not hold two VALIDATED records,
+     * one per type.
+     */
+    @Test
+    void trainingRecordUnderAValidatedDatasetIdIsRejected() {
+        resource.submit(VALID_RECORD.getBytes(StandardCharsets.UTF_8));
+
+        var response = resource.submit(TRAINING_RECORD.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(409, response.getStatus());
+        IngestResource.ConflictResponse body = (IngestResource.ConflictResponse) response.getEntity();
+        assertEquals(RECORD_ID, body.qualifiedName());
+        assertEquals(RecordStatus.VALIDATED, body.recordStatus());
+        assertNull(
+                fake.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, RECORD_ID),
+                "no second record may be created under a taken id");
     }
 
     @Test
@@ -181,7 +241,7 @@ class IngestResourceTest {
     @Test
     void statusReturnsRecordStateAndIssues() {
         resource.submit(INVALID_RECORD.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        fake.store.get(RECORD_ID).setValidationIssues("[{\"message\": \"missing license\"}]");
+        storedDataset().setValidationIssues("[{\"message\": \"missing license\"}]");
 
         var response = resource.status(RECORD_ID);
 
@@ -206,10 +266,30 @@ class IngestResourceTest {
         assertNull(body.validationIssues(), "the cleared sentinel never surfaces");
     }
 
-    /** In-memory stand-in for the Atlas backend: a map keyed by qualifiedName. */
+    private SourcelumeDatasetDto storedDataset() {
+        return (SourcelumeDatasetDto) fake.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, RECORD_ID);
+    }
+
+    private static String trainingRecord() {
+        try {
+            String body = Files.readString(
+                    Path.of("src/test/resources/records/it-training-valid.jsonld"), StandardCharsets.UTF_8);
+            return body.replaceFirst("\"id\":\\s*\"[^\"]*\"", "\"id\": \"" + RECORD_ID + "\"");
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Could not read it-training-valid.jsonld", e);
+        }
+    }
+
+    /**
+     * In-memory stand-in for the Atlas backend: a map keyed by
+     * (type, qualifiedName), like Atlas — or cross-type collisions stay
+     * invisible to the tests.
+     */
     static class FakeAtlasAdapter implements AtlasAdapter {
 
-        final java.util.Map<String, RecordEntityDto> store = new java.util.HashMap<>();
+        record StoreKey(String entityType, String qualifiedName) {}
+
+        final java.util.Map<StoreKey, RecordEntityDto> store = new java.util.HashMap<>();
 
         @Override
         public boolean isServerReady() {
@@ -228,14 +308,18 @@ class IngestResourceTest {
 
         @Override
         public String createOrUpdateRecordEntity(RecordEntityDto record) {
-            store.put(record.getQualifiedName(), record);
+            store.put(new StoreKey(record.getTypeName(), record.getQualifiedName()), record);
             return record.getGuid() != null ? record.getGuid() : "guid-1";
         }
 
         @Override
         public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
-            RecordEntityDto stored = store.get(qualifiedName);
-            return stored != null && entityType.equals(stored.getTypeName()) ? stored : null;
+            return store.get(new StoreKey(entityType, qualifiedName));
+        }
+
+        @Override
+        public void deleteRecordEntity(String entityType, String qualifiedName) {
+            store.remove(new StoreKey(entityType, qualifiedName));
         }
 
         @Override

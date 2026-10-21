@@ -31,6 +31,8 @@ import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.RecordType;
@@ -114,7 +116,7 @@ public class IngestResource {
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @APIResponse(
             responseCode = "409",
-            description = "The record is already VALIDATED",
+            description = "The record is already VALIDATED, or the id is taken under a different record type",
             content = @Content(schema = @Schema(implementation = ConflictResponse.class)))
     @APIResponse(responseCode = "415", description = "Unsupported content type")
     public Response submit(byte[] received) {
@@ -134,11 +136,36 @@ public class IngestResource {
         // entity — the chain will mark it INCOMPLETE and it stays curatable.
         String recordTypeTerm = RecordJson.extractRecordType(rawJsonLd).orElse(null);
         String entityType = RecordType.entityTypeFor(recordTypeTerm);
-        RecordEntityDto existing = atlasAdapter.getRecordEntityByQualifiedName(entityType, recordId);
-        if (existing != null && existing.getRecordStatus() == RecordStatus.VALIDATED) {
-            return Response.status(409)
-                    .entity(new ConflictResponse(recordId, existing.getRecordStatus()))
-                    .build();
+
+        // But the id names one record whichever store it landed in, so
+        // the guard looks in every record store: VALIDATED under any
+        // type blocks the submission. An entity under a different type
+        // is either a replaceable INCOMPLETE stub — it carries no
+        // provenance payload, only its failure report, and a stale stub
+        // would keep answering GET /records/{id} over the new entity —
+        // or a conflict this write cannot merge into.
+        List<RecordEntityDto> stored =
+                atlasAdapter.getRecordEntitiesByQualifiedName(RecordType.entityTypeNames(), recordId);
+        RecordEntityDto existing = null;
+        List<RecordEntityDto> replaceableStubs = new ArrayList<>();
+        for (RecordEntityDto entity : stored) {
+            if (entity.getRecordStatus() == RecordStatus.VALIDATED) {
+                return Response.status(409)
+                        .entity(new ConflictResponse(recordId, entity.getRecordStatus()))
+                        .build();
+            }
+            if (entityType.equals(entity.getTypeName())) {
+                existing = entity;
+            } else if (entity.getRecordStatus() == RecordStatus.INCOMPLETE) {
+                replaceableStubs.add(entity);
+            } else {
+                return Response.status(409)
+                        .entity(new ConflictResponse(recordId, entity.getRecordStatus()))
+                        .build();
+            }
+        }
+        for (RecordEntityDto stub : replaceableStubs) {
+            atlasAdapter.deleteRecordEntity(stub.getTypeName(), recordId);
         }
 
         // Inline validation: the same IngestService a queue consumer
@@ -162,7 +189,7 @@ public class IngestResource {
         }
         IngestResult result = ingestService.process(submitted);
 
-        return Response.status(existing == null ? 201 : 200)
+        return Response.status(stored.isEmpty() ? 201 : 200)
                 .location(locationOf(recordId))
                 .entity(IngestResponse.of(result, objectMapper))
                 .build();
@@ -185,13 +212,8 @@ public class IngestResource {
                     String id) {
         // The id's owning entity type is discovered, not stored — check
         // each record type's store until one answers.
-        RecordEntityDto stored = null;
-        for (RecordType type : RecordType.values()) {
-            stored = atlasAdapter.getRecordEntityByQualifiedName(type.entityTypeName(), id);
-            if (stored != null) {
-                break;
-            }
-        }
+        List<RecordEntityDto> found = atlasAdapter.getRecordEntitiesByQualifiedName(RecordType.entityTypeNames(), id);
+        RecordEntityDto stored = found.isEmpty() ? null : found.get(0);
         if (stored == null) {
             return Response.status(404)
                     .entity(new ErrorResponse("No record for id: " + id))

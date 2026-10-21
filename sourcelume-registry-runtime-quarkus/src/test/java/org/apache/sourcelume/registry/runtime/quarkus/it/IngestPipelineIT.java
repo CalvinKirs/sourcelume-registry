@@ -19,6 +19,7 @@ package org.apache.sourcelume.registry.runtime.quarkus.it;
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkus.test.junit.QuarkusTest;
@@ -184,6 +185,77 @@ class IngestPipelineIT {
         assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
         assertEquals("https://example.org/models/it-model", stored.getModelUri());
         assertEquals("complete", stored.getDisclosure());
+    }
+
+    /**
+     * Cross-type resubmission: a document without {@code type} lands as an
+     * INCOMPLETE dataset stub; the corrected resubmission declares
+     * TrainingProvenanceRecord, and the stub is deleted rather than left
+     * shadowing the status view with a stale verdict.
+     */
+    @Test
+    void trainingRecordReplacesTheIncompleteDatasetStub() throws Exception {
+        String recordId = uniqueId("replace-stub");
+        String typeless = fixture("/records/it-valid.jsonld", recordId).replace("\"type\": \"ProvenanceRecord\",", "");
+
+        given().contentType("application/ld+json")
+                .body(typeless)
+                .when()
+                .post("/records")
+                .then()
+                .statusCode(201)
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("INCOMPLETE"));
+
+        String training = fixture("/records/it-training-valid.jsonld", recordId);
+        given().contentType("application/ld+json")
+                .body(training)
+                .when()
+                .post("/records")
+                .then()
+                .statusCode(200)
+                .body("type", org.hamcrest.Matchers.equalTo("TrainingProvenanceRecord"))
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"));
+
+        given().urlEncodingEnabled(false)
+                .when()
+                .get("/records/" + java.net.URLEncoder.encode(recordId, StandardCharsets.UTF_8))
+                .then()
+                .statusCode(200)
+                .body("type", org.hamcrest.Matchers.equalTo("TrainingProvenanceRecord"))
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"));
+
+        assertNull(
+                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, recordId),
+                "the dataset stub must be deleted, not shadowed");
+    }
+
+    /**
+     * The 409 guard on {@code POST /api/v1/datasets} sees records in every
+     * store: a plain dataset entity under a model record's id would shadow
+     * it, and the status view would answer the shadow.
+     */
+    @Test
+    void datasetEndpointCannotShadowAModelRecord() throws Exception {
+        String recordId = uniqueId("model-guard");
+        String training = fixture("/records/it-training-valid.jsonld", recordId);
+        given().contentType("application/ld+json")
+                .body(training)
+                .when()
+                .post("/records")
+                .then()
+                .statusCode(201);
+
+        given().contentType("application/json")
+                .body("{\"qualifiedName\": \"" + recordId + "\", \"name\": \"shadow\"}")
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(409);
+
+        // The model record itself stays readable through the status view.
+        SourcelumeModelDto stored = (SourcelumeModelDto)
+                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, recordId);
+        assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
     }
 
     @Test

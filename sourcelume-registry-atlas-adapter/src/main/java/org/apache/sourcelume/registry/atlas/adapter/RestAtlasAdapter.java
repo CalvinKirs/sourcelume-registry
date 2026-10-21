@@ -62,6 +62,7 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code PUT  /api/atlas/v2/types/typedefs} — update typedefs (on 409/conflict)</li>
  *   <li>{@code POST /api/atlas/v2/entity/bulk} — create/update a record entity</li>
  *   <li>{@code GET  /api/atlas/v2/entity/uniqueAttribute/type/{typeName}?attr:qualifiedName=...} — lookup</li>
+ *   <li>{@code DELETE /api/atlas/v2/entity/uniqueAttribute/type/{typeName}?attr:qualifiedName=...} — delete a stub</li>
  *   <li>{@code POST /api/atlas/v2/search/basic} — find record entities by record status</li>
  * </ul>
  *
@@ -333,6 +334,30 @@ public class RestAtlasAdapter implements AtlasAdapter {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new AtlasAdapterException("Interrupted fetching entity", 500, e);
+        }
+    }
+
+    @Override
+    public void deleteRecordEntity(String entityType, String qualifiedName) {
+        try {
+            String q = URLEncoder.encode(qualifiedName, StandardCharsets.UTF_8);
+            String path = "/api/atlas/v2/entity/uniqueAttribute/type/" + entityType + "?attr:qualifiedName=" + q;
+            HttpRequest req = baseRequest("DELETE", path).DELETE().build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            // A 404 means the stub is already gone — the outcome the
+            // caller asked for, not a failure.
+            if (resp.statusCode() == 404) {
+                return;
+            }
+            if (resp.statusCode() != 200 && resp.statusCode() != 204) {
+                throw new AtlasAdapterException(
+                        "Failed to delete record entity from Atlas: " + resp.body(), resp.statusCode(), null);
+            }
+        } catch (IOException e) {
+            throw new AtlasAdapterException("I/O error deleting entity: " + e.getMessage(), 500, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AtlasAdapterException("Interrupted deleting entity", 500, e);
         }
     }
 

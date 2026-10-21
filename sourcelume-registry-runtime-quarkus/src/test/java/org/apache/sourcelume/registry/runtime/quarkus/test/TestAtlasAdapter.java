@@ -31,7 +31,10 @@ import org.apache.sourcelume.registry.core.AtlasAdapter;
 @ApplicationScoped
 public class TestAtlasAdapter implements AtlasAdapter {
 
-    private final Map<String, RecordEntityDto> byQualifiedName = new ConcurrentHashMap<>();
+    /** Atlas keys entities by (type, qualifiedName) — so does the fake, or cross-type collisions stay invisible. */
+    private record StoreKey(String entityType, String qualifiedName) {}
+
+    private final Map<StoreKey, RecordEntityDto> byQualifiedName = new ConcurrentHashMap<>();
     private final Map<String, RecordEntityDto> byGuid = new ConcurrentHashMap<>();
 
     @Override
@@ -59,20 +62,28 @@ public class TestAtlasAdapter implements AtlasAdapter {
 
     @Override
     public String createOrUpdateRecordEntity(RecordEntityDto record) {
-        RecordEntityDto existing = byQualifiedName.get(record.getQualifiedName());
+        StoreKey key = new StoreKey(record.getTypeName(), record.getQualifiedName());
+        RecordEntityDto existing = byQualifiedName.get(key);
         String guid = record.getGuid() != null
                 ? record.getGuid()
                 : existing != null ? existing.getGuid() : UUID.randomUUID().toString();
         record.setGuid(guid);
-        byQualifiedName.put(record.getQualifiedName(), record);
+        byQualifiedName.put(key, record);
         byGuid.put(guid, record);
         return guid;
     }
 
     @Override
     public RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName) {
-        RecordEntityDto stored = byQualifiedName.get(qualifiedName);
-        return stored != null && entityType.equals(stored.getTypeName()) ? stored : null;
+        return byQualifiedName.get(new StoreKey(entityType, qualifiedName));
+    }
+
+    @Override
+    public void deleteRecordEntity(String entityType, String qualifiedName) {
+        RecordEntityDto removed = byQualifiedName.remove(new StoreKey(entityType, qualifiedName));
+        if (removed != null && removed.getGuid() != null) {
+            byGuid.remove(removed.getGuid());
+        }
     }
 
     @Override

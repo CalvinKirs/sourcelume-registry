@@ -16,6 +16,7 @@
  */
 package org.apache.sourcelume.registry.core;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
@@ -87,6 +88,42 @@ public interface AtlasAdapter {
      * @return the entity DTO, or null
      */
     RecordEntityDto getRecordEntityByQualifiedName(String entityType, String qualifiedName);
+
+    /**
+     * Retrieves every record entity stored for the qualified name across the
+     * given entity types, in the order given. An id names one record
+     * whichever record store it landed in, so guards must look everywhere —
+     * a lookup that checks only the store a submission targets stays blind
+     * to a sibling store's copy of the same id.
+     *
+     * @param entityTypes   the entity types to search, in order
+     * @param qualifiedName the qualified name to look up
+     * @return the entities found for the id, never null
+     */
+    default List<RecordEntityDto> getRecordEntitiesByQualifiedName(List<String> entityTypes, String qualifiedName) {
+        List<RecordEntityDto> found = new ArrayList<>();
+        for (String entityType : entityTypes) {
+            RecordEntityDto entity = getRecordEntityByQualifiedName(entityType, qualifiedName);
+            if (entity != null) {
+                found.add(entity);
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Deletes the record entity stored under the given type and qualified
+     * name. The ingest guard uses it to replace an INCOMPLETE stub that sits
+     * in a different record store than the resubmission targets — a stub
+     * carries no provenance payload, only its failure report, so deleting it
+     * loses nothing. Backends that soft-delete (Atlas marks entities
+     * DELETED) leave the registry's lookups blind to the removed stub, which
+     * is exactly what the replacement needs.
+     *
+     * @param entityType    the backend entity type the entity is stored under
+     * @param qualifiedName the qualified name of the entity to delete
+     */
+    void deleteRecordEntity(String entityType, String qualifiedName);
 
     /**
      * Retrieves a record entity by its backend GUID, or {@code null} if

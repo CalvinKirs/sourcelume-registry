@@ -16,6 +16,8 @@
  */
 package org.apache.sourcelume.registry.common.dto;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import org.apache.sourcelume.registry.common.spec.SpecResourceLoader;
 
@@ -98,6 +100,11 @@ public enum RecordType {
             }
         }
         return Optional.empty();
+    }
+
+    /** Every record store's entity type name, in declaration order — the stores an id can live in. */
+    public static List<String> entityTypeNames() {
+        return Arrays.stream(values()).map(RecordType::entityTypeName).toList();
     }
 
     /** Resolves a backend entity type name back to its record type. */
