@@ -25,6 +25,10 @@ components:
           type: string
         recordStatus:
           $ref: "#/components/schemas/RecordStatus"
+        entityType:
+          type: string
+        reason:
+          type: string
     DatasetErrorResponse:
       type: object
       properties:

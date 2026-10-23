@@ -90,7 +90,7 @@ GET status view both report the context.
 | Request | Result |
 |---|---|
 | `POST /records` (JSON-LD body) | `201` new record, `200` resubmission — body: `qualifiedName`, `type`, `recordStatus`, `sha256`, `validatedBy`, `validatedAt`, and for `INCOMPLETE` the `validationIssues` |
-| `POST /records` for an id that is already VALIDATED | `409` |
+| `POST /records` for an id that is already VALIDATED, or taken by a plain dataset | `409` — body: `qualifiedName`, `recordStatus` (absent for a plain dataset), `entityType` (the store holding the id), `reason` |
 | `POST /records` without a usable `@id`, or unparseable | `400` |
 | `POST /records` with an unsupported content type | `415` |
 | `GET /records/{id}` | `200` record view: `type`, status, the type's mapped attributes, and for INCOMPLETE the issues + verdict context / `404` |
