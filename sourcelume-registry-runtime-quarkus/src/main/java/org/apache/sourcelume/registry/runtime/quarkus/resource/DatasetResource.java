@@ -16,8 +16,18 @@
  */
 package org.apache.sourcelume.registry.runtime.quarkus.resource;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.databind.JsonNode;
+import io.quarkus.hibernate.validator.runtime.jaxrs.ResteasyReactiveViolationException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ElementKind;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertFalse;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -28,6 +38,7 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+import java.util.Set;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
@@ -39,6 +50,7 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.resteasy.reactive.server.ServerExceptionMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,14 +84,13 @@ public class DatasetResource {
     /**
      * Creates or updates a Sourcelume dataset entity. Provenance records are managed via {@code POST /records}.
      *
-     * @param dataset the dataset DTO to persist
+     * @param request the writable dataset attributes
      * @return 201 Created for a new dataset, 200 OK for an updated dataset, 400 Bad Request, or 409 Conflict if
      *     the qualifiedName is a provenance record
      */
     @POST
     @Operation(summary = "Create or update a dataset entity")
     @RequestBody(
-            required = true,
             description = "Plain dataset attributes. Verdict fields (recordStatus, rawJsonLd, validationIssues,"
                     + " sha256, validatedBy, validatedAt) are set by the registry and rejected.")
     @APIResponse(
@@ -98,28 +109,9 @@ public class DatasetResource {
             responseCode = "409",
             description = "The qualifiedName is a provenance record; use POST /records",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    public Response createOrUpdateDataset(SourcelumeDatasetDto dataset) {
-        if (dataset == null) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new ErrorResponse("Request body cannot be null"))
-                    .build();
-        }
-        if (dataset.getQualifiedName() == null || dataset.getQualifiedName().isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new ErrorResponse("qualifiedName is required"))
-                    .build();
-        }
-        if (dataset.getName() == null || dataset.getName().isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new ErrorResponse("name is required"))
-                    .build();
-        }
-        // Verdict fields are only ever set by the validator chain in POST /records
-        if (carriesVerdictFields(dataset)) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new ErrorResponse("Verdict fields are set by the registry; use POST /records"))
-                    .build();
-        }
+    public Response createOrUpdateDataset(
+            @NotNull(message = "Request body cannot be null") @Valid DatasetRequest request) {
+        SourcelumeDatasetDto dataset = request.toDataset();
         // A provenance record can only be changed via POST /records —
         // under any record type. Checking only the dataset store would
         // let a plain dataset shadow a model record's id, and
@@ -146,13 +138,25 @@ public class DatasetResource {
         return Response.status(status).entity(dataset).build();
     }
 
-    private static boolean carriesVerdictFields(SourcelumeDatasetDto dataset) {
-        return dataset.getRecordStatus() != null
-                || dataset.getRawJsonLd() != null
-                || dataset.getValidationIssues() != null
-                || dataset.getSha256() != null
-                || dataset.getValidatedBy() != null
-                || dataset.getValidatedAt() != null;
+    /** Keep this resource's documented error envelope for REST input validation failures. */
+    @ServerExceptionMapper
+    Response invalidDatasetRequest(ResteasyReactiveViolationException exception) {
+        for (ConstraintViolation<?> violation : exception.getConstraintViolations()) {
+            for (var node : violation.getPropertyPath()) {
+                if (node.getKind() == ElementKind.RETURN_VALUE) {
+                    throw exception;
+                }
+            }
+        }
+        String message = exception.getConstraintViolations().stream()
+                .map(ConstraintViolation::getMessage)
+                .sorted()
+                .findFirst()
+                .orElse("Invalid dataset request");
+        return Response.status(Response.Status.BAD_REQUEST)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(new ErrorResponse(message))
+                .build();
     }
 
     /**
@@ -258,6 +262,44 @@ public class DatasetResource {
         RecordEntityDto stored =
                 atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, qualifiedName);
         return stored instanceof SourcelumeDatasetDto ? (SourcelumeDatasetDto) stored : null;
+    }
+
+    /** The same request constraints drive REST validation and the OpenAPI schema. */
+    @Schema(name = "DatasetRequest")
+    public static class DatasetRequest {
+
+        private static final Set<String> VERDICT_FIELDS =
+                Set.of("recordStatus", "rawJsonLd", "validationIssues", "sha256", "validatedBy", "validatedAt");
+
+        @NotBlank(message = "qualifiedName is required")
+        public String qualifiedName;
+
+        @NotBlank(message = "name is required")
+        public String name;
+
+        public String description;
+        public String sourceUri;
+        public String licenseId;
+
+        @JsonIgnore
+        @Schema(hidden = true)
+        @AssertFalse(message = "Verdict fields are set by the registry; use POST /records")
+        private boolean carryingVerdictFields;
+
+        // Preserve the existing distinction: unknown fields are ignored, while
+        // non-null registry-owned verdict fields must be rejected, not silently dropped.
+        @JsonAnySetter
+        public void additionalProperty(String property, JsonNode value) {
+            if (VERDICT_FIELDS.contains(property) && value != null && !value.isNull()) {
+                carryingVerdictFields = true;
+            }
+        }
+
+        SourcelumeDatasetDto toDataset() {
+            SourcelumeDatasetDto dataset = new SourcelumeDatasetDto(qualifiedName, name, sourceUri, licenseId);
+            dataset.setDescription(description);
+            return dataset;
+        }
     }
 
     /** Wire DTO for error responses; named apart from the ingest API's ErrorResponse in the OpenAPI document. */

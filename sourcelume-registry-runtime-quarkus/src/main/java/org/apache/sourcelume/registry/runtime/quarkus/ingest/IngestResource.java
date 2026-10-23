@@ -44,9 +44,9 @@ import org.apache.sourcelume.registry.core.ingest.IngestResult;
 import org.apache.sourcelume.registry.core.ingest.IngestService;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.headers.Header;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.ExampleObject;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
@@ -95,10 +95,25 @@ public class IngestResource {
                     + " corrected by resubmitting).")
     @RequestBody(
             required = true,
-            description = "A Sourcelume ProvenanceRecord as JSON-LD",
+            description = "A dataset or model provenance record as JSON-LD. Records with a nonblank id that fail"
+                    + " spec validation are also accepted and stored as INCOMPLETE with their validation issues.",
             content = {
-                @Content(mediaType = "application/ld+json", schema = @Schema(type = SchemaType.OBJECT)),
-                @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(type = SchemaType.OBJECT))
+                @Content(
+                        mediaType = "application/ld+json",
+                        schema = @Schema(ref = "#/components/schemas/RecordSubmission"),
+                        examples = {
+                            @ExampleObject(name = "dataset", ref = "#/components/examples/DatasetRecord"),
+                            @ExampleObject(name = "model", ref = "#/components/examples/TrainingRecord"),
+                            @ExampleObject(name = "incomplete", ref = "#/components/examples/IncompleteRecord")
+                        }),
+                @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(ref = "#/components/schemas/RecordSubmission"),
+                        examples = {
+                            @ExampleObject(name = "dataset", ref = "#/components/examples/DatasetRecord"),
+                            @ExampleObject(name = "model", ref = "#/components/examples/TrainingRecord"),
+                            @ExampleObject(name = "incomplete", ref = "#/components/examples/IncompleteRecord")
+                        })
             })
     @APIResponse(
             responseCode = "201",

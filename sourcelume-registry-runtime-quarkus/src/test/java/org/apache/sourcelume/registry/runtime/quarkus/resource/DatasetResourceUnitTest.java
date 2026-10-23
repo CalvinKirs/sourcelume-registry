@@ -20,12 +20,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import jakarta.ws.rs.core.Response;
 import java.util.List;
-import java.util.function.Consumer;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
+import org.apache.sourcelume.registry.runtime.quarkus.resource.DatasetResource.DatasetRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -102,46 +102,22 @@ class DatasetResourceUnitTest {
     }
 
     @Test
-    void testCreateOrUpdateDatasetValidation() {
-        Response rNull = resource.createOrUpdateDataset(null);
-        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), rNull.getStatus());
+    void testCreateDatasetMapsTheWritableAttributes() {
+        DatasetRequest request = plainRequest("sourcelume://datasets/test");
+        request.description = "A dataset description";
+        request.sourceUri = "https://example.org/datasets/test";
+        request.licenseId = "Apache-2.0";
 
-        SourcelumeDatasetDto missingQName = new SourcelumeDatasetDto();
-        missingQName.setName("Name");
-        Response rNoQName = resource.createOrUpdateDataset(missingQName);
-        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), rNoQName.getStatus());
+        Response response = resource.createOrUpdateDataset(request);
 
-        SourcelumeDatasetDto missingName = new SourcelumeDatasetDto();
-        missingName.setQualifiedName("sourcelume://datasets/test");
-        Response rNoName = resource.createOrUpdateDataset(missingName);
-        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), rNoName.getStatus());
-
-        SourcelumeDatasetDto valid = new SourcelumeDatasetDto();
-        valid.setQualifiedName("sourcelume://datasets/test");
-        valid.setName("Test");
-        Response rOk = resource.createOrUpdateDataset(valid);
-        assertEquals(Response.Status.CREATED.getStatusCode(), rOk.getStatus());
-    }
-
-    @Test
-    void testCreateOrUpdateDatasetRejectsEachVerdictField() {
-        List<Consumer<SourcelumeDatasetDto>> verdictFields = List.of(
-                d -> d.setRecordStatus(RecordStatus.VALIDATED),
-                d -> d.setRawJsonLd("{}"),
-                d -> d.setValidationIssues("[]"),
-                d -> d.setSha256("abc"),
-                d -> d.setValidatedBy("json-schema,shacl"),
-                d -> d.setValidatedAt("2026-10-15T00:00:00Z"));
-
-        for (Consumer<SourcelumeDatasetDto> verdictField : verdictFields) {
-            SourcelumeDatasetDto dataset = plainDataset("sourcelume://datasets/test");
-            verdictField.accept(dataset);
-
-            Response response = resource.createOrUpdateDataset(dataset);
-
-            assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
-        }
-        assertEquals(0, adapter.writes);
+        assertEquals(Response.Status.CREATED.getStatusCode(), response.getStatus());
+        SourcelumeDatasetDto dataset = (SourcelumeDatasetDto) response.getEntity();
+        assertEquals(request.qualifiedName, dataset.getQualifiedName());
+        assertEquals(request.name, dataset.getName());
+        assertEquals(request.description, dataset.getDescription());
+        assertEquals(request.sourceUri, dataset.getSourceUri());
+        assertEquals(request.licenseId, dataset.getLicenseId());
+        assertEquals("guid-created", dataset.getGuid());
     }
 
     @Test
@@ -151,7 +127,7 @@ class DatasetResourceUnitTest {
             record.setRecordStatus(status);
             adapter.storedByQName = record;
 
-            Response response = resource.createOrUpdateDataset(plainDataset("https://example.org/records/r1"));
+            Response response = resource.createOrUpdateDataset(plainRequest("https://example.org/records/r1"));
 
             assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
         }
@@ -169,7 +145,7 @@ class DatasetResourceUnitTest {
         record.setRecordStatus(RecordStatus.VALIDATED);
         adapter.storedByQName = record;
 
-        Response response = resource.createOrUpdateDataset(plainDataset("https://example.org/records/model-r1"));
+        Response response = resource.createOrUpdateDataset(plainRequest("https://example.org/records/model-r1"));
 
         assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
         assertEquals(0, adapter.writes);
@@ -179,10 +155,17 @@ class DatasetResourceUnitTest {
     void testCreateOrUpdateDatasetUpdatesExistingPlainDataset() {
         adapter.storedByQName = plainDataset("sourcelume://datasets/test");
 
-        Response response = resource.createOrUpdateDataset(plainDataset("sourcelume://datasets/test"));
+        Response response = resource.createOrUpdateDataset(plainRequest("sourcelume://datasets/test"));
 
         assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
         assertEquals(1, adapter.writes);
+    }
+
+    private static DatasetRequest plainRequest(String qualifiedName) {
+        DatasetRequest request = new DatasetRequest();
+        request.qualifiedName = qualifiedName;
+        request.name = "Test";
+        return request;
     }
 
     private static SourcelumeDatasetDto plainDataset(String qualifiedName) {

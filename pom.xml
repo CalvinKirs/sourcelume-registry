@@ -74,9 +74,10 @@
 
     <!-- Dependency versions: no framework BOM, the core is framework-free -->
     <jackson.version>2.18.4</jackson.version>
-    <jakarta.validation.version>3.0.2</jakarta.validation.version>
-    <hibernate-validator.version>8.0.1.Final</hibernate-validator.version>
-    <expressly.version>5.0.0</expressly.version>
+    <!-- Keep validation versions aligned with the runtime module's Quarkus BOM. -->
+    <jakarta.validation.version>3.1.1</jakarta.validation.version>
+    <hibernate-validator.version>9.1.0.Final</hibernate-validator.version>
+    <expressly.version>6.0.0</expressly.version>
     <slf4j.version>2.0.16</slf4j.version>
     <junit.version>5.11.4</junit.version>
     <json-schema-validator.version>2.0.4</json-schema-validator.version>

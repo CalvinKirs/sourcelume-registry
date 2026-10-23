@@ -27,8 +27,8 @@ import java.util.List;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.apache.sourcelume.registry.core.validation.ValidatorChain;
 import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.ExampleObject;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -72,8 +72,17 @@ public class RecordValidationResource {
             description = "Runs the validator chain (JSON Schema, then SHACL), stopping at the first failing stage.")
     @RequestBody(
             required = true,
-            description = "A Sourcelume ProvenanceRecord as JSON-LD",
-            content = @Content(schema = @Schema(type = SchemaType.OBJECT)))
+            description = "A dataset or model provenance record as JSON-LD. Non-conforming records, including"
+                    + " records without an id, return 422 with validation issues.",
+            content =
+                    @Content(
+                            schema = @Schema(ref = "#/components/schemas/RecordValidationRequest"),
+                            examples = {
+                                @ExampleObject(name = "dataset", ref = "#/components/examples/DatasetRecord"),
+                                @ExampleObject(name = "model", ref = "#/components/examples/TrainingRecord"),
+                                @ExampleObject(name = "incomplete", ref = "#/components/examples/IncompleteRecord"),
+                                @ExampleObject(name = "missingId", ref = "#/components/examples/MissingRecordId")
+                            }))
     @APIResponse(
             responseCode = "200",
             description = "The record conforms",
