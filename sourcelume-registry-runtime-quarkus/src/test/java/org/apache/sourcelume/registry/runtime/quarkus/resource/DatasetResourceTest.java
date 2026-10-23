@@ -72,6 +72,27 @@ class DatasetResourceTest {
         }
     }
 
+    @Test
+    void shouldReportMultipleInvalidFieldsInAFixedOrder() {
+        // qualifiedName first, then name, then the verdict fields - not alphabetical.
+        assertRejectedWith("{}", "qualifiedName is required");
+        assertRejectedWith("{\"qualifiedName\":\"x\",\"recordStatus\":\"VALIDATED\"}", "name is required");
+        assertRejectedWith(
+                "{\"qualifiedName\":\"x\",\"name\":\"n\",\"recordStatus\":\"VALIDATED\"}",
+                "Verdict fields are set by the registry; use POST /records");
+        assertRejectedWith("{\"recordStatus\":\"VALIDATED\"}", "qualifiedName is required");
+    }
+
+    private static void assertRejectedWith(String body, String message) {
+        given().contentType(ContentType.JSON)
+                .body(body)
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(400)
+                .body("error", equalTo(message));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"recordStatus", "rawJsonLd", "validationIssues", "sha256", "validatedBy", "validatedAt"})
     void shouldRejectEachNonNullVerdictField(String field) {

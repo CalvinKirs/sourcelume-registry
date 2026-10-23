@@ -37,6 +37,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
@@ -149,14 +150,25 @@ public class DatasetResource {
             }
         }
         String message = exception.getConstraintViolations().stream()
+                .min(Comparator.comparingInt(DatasetResource::errorRank))
                 .map(ConstraintViolation::getMessage)
-                .sorted()
-                .findFirst()
                 .orElse("Invalid dataset request");
         return Response.status(Response.Status.BAD_REQUEST)
                 .type(MediaType.APPLICATION_JSON)
                 .entity(new ErrorResponse(message))
                 .build();
+    }
+
+    /** Several invalid fields yield one message; this is the order they are reported in. */
+    private static final List<String> ERROR_ORDER = List.of("qualifiedName", "name", "carryingVerdictFields");
+
+    private static int errorRank(ConstraintViolation<?> violation) {
+        String property = null;
+        for (var node : violation.getPropertyPath()) {
+            property = node.getName();
+        }
+        int rank = ERROR_ORDER.indexOf(property);
+        return rank < 0 ? ERROR_ORDER.size() : rank;
     }
 
     /**
