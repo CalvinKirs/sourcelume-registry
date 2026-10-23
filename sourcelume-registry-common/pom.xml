@@ -43,6 +43,7 @@
     <dependency>
       <groupId>jakarta.validation</groupId>
       <artifactId>jakarta.validation-api</artifactId>
+      <version>${jakarta.validation.version}</version>
     </dependency>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
@@ -65,12 +66,14 @@
     <dependency>
       <groupId>org.hibernate.validator</groupId>
       <artifactId>hibernate-validator</artifactId>
+      <version>${hibernate-validator.version}</version>
       <scope>test</scope>
     </dependency>
     <!-- EL implementation required to bootstrap hibernate-validator standalone -->
     <dependency>
       <groupId>org.glassfish.expressly</groupId>
       <artifactId>expressly</artifactId>
+      <version>${expressly.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

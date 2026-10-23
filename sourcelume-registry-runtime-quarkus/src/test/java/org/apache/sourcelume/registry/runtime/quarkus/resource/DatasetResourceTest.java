@@ -19,21 +19,125 @@ package org.apache.sourcelume.registry.runtime.quarkus.resource;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.NullNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
+import java.util.UUID;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @QuarkusTest
 class DatasetResourceTest {
 
     @Inject
     AtlasAdapter atlasAdapter;
+
+    @Inject
+    ObjectMapper objectMapper;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"qualifiedName", "name"})
+    void shouldRejectMissingNullAndBlankRequiredFields(String field) {
+        for (JsonNode value : new JsonNode[] {
+            null, NullNode.instance, TextNode.valueOf(""), TextNode.valueOf(" \t\r\n"), TextNode.valueOf("\u2003")
+        }) {
+            ObjectNode body = validRequest();
+            String qualifiedName = body.path("qualifiedName").asText();
+            if (value == null) {
+                body.remove(field);
+            } else {
+                body.set(field, value);
+            }
+
+            given().contentType(ContentType.JSON)
+                    .body(body.toString())
+                    .when()
+                    .post("/api/v1/datasets")
+                    .then()
+                    .statusCode(400)
+                    .body("error", equalTo(field + " is required"));
+            assertNull(atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, qualifiedName));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"recordStatus", "rawJsonLd", "validationIssues", "sha256", "validatedBy", "validatedAt"})
+    void shouldRejectEachNonNullVerdictField(String field) {
+        ObjectNode body = validRequest();
+        body.put(field, field.equals("recordStatus") ? "VALIDATED" : "forged");
+        body.put("carryingVerdictFields", false);
+
+        given().contentType(ContentType.JSON)
+                .body(body.toString())
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(400)
+                .body("error", equalTo("Verdict fields are set by the registry; use POST /records"));
+        assertNull(atlasAdapter.getRecordEntityByQualifiedName(
+                SourcelumeDatasetDto.TYPE_NAME, body.path("qualifiedName").asText()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"recordStatus", "rawJsonLd", "validationIssues", "sha256", "validatedBy", "validatedAt"})
+    void shouldContinueToAllowNullVerdictFields(String field) {
+        ObjectNode body = validRequest();
+        body.putNull(field);
+
+        given().contentType(ContentType.JSON)
+                .body(body.toString())
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(201)
+                .body("name", equalTo("Test dataset"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "null"})
+    void shouldRejectMissingRequestBody(String body) {
+        given().contentType(ContentType.JSON)
+                .body(body)
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(400)
+                .body("error", equalTo("Request body cannot be null"));
+    }
+
+    @Test
+    void shouldIgnoreUnknownFieldsAndKeepNonblankValuesUnchanged() {
+        ObjectNode body = validRequest();
+        body.put("name", "  Test dataset  ");
+        body.putObject("extension").put("arbitrary", true);
+
+        given().contentType(ContentType.JSON)
+                .body(body.toString())
+                .when()
+                .post("/api/v1/datasets")
+                .then()
+                .statusCode(201)
+                .body("name", equalTo("  Test dataset  "));
+    }
+
+    private ObjectNode validRequest() {
+        return objectMapper
+                .createObjectNode()
+                .put("qualifiedName", "https://example.org/datasets/" + UUID.randomUUID())
+                .put("name", "Test dataset");
+    }
 
     @Test
     void shouldCreateAndFetchDataset() {

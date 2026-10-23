@@ -1,0 +1,11 @@
+{
+  "@context": "https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld",
+  "id": "https://example.org/records/model-v1",
+  "type": "TrainingProvenanceRecord",
+  "identifier": "https://example.org/models/example-v1",
+  "name": "Example model",
+  "creator": [{"type": "schema:Organization", "name": "Example Organization"}],
+  "created": "2026-10-01T00:00:00Z",
+  "disclosure": "complete",
+  "trainingData": [{"dataset": "https://example.org/records/dataset-v1", "phase": "pretraining", "tokens": 1000, "share": 1.0}]
+}

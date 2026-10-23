@@ -22,12 +22,23 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.http.ContentType;
+import jakarta.inject.Inject;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import org.apache.sourcelume.registry.common.dto.RecordType;
+import org.apache.sourcelume.registry.common.spec.SpecResourceLoader;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -40,6 +51,149 @@ class OpenApiDocumentTest {
 
     /** The committed contract, relative to this module. */
     private static final Path SNAPSHOT = Path.of("../docs/openapi.yaml");
+
+    @Inject
+    ObjectMapper objectMapper;
+
+    @Test
+    void shouldPublishTheValidatorSchemasWithoutLosingConstraints() throws IOException {
+        JsonNode schemas = openApiDocument().path("components").path("schemas");
+        for (RecordType type : RecordType.values()) {
+            JsonNode spec = objectMapper.readTree(SpecResourceLoader.loadResourceString(type.schemaResource()));
+            assertEquals(spec, schemas.path(type.typeName()), "OpenAPI must preserve the spec schema for " + type);
+        }
+    }
+
+    @Test
+    void shouldDescribeBothRecordTypesAndIncompleteSubmissions() throws IOException {
+        JsonNode document = openApiDocument();
+        JsonNode schemas = document.path("components").path("schemas");
+        assertEquals(
+                objectMapper.readTree(
+                        """
+                        [
+                          {"$ref":"#/components/schemas/ProvenanceRecord"},
+                          {"$ref":"#/components/schemas/TrainingProvenanceRecord"},
+                          {"$ref":"#/components/schemas/IncompleteRecordSubmission"}
+                        ]
+                        """),
+                schemas.path("RecordSubmission").path("anyOf"));
+        assertEquals(
+                objectMapper.readTree("[\"id\"]"),
+                schemas.path("IncompleteRecordSubmission").path("required"));
+
+        for (String path : List.of("/records", "/records/validate")) {
+            JsonNode content = document.path("paths")
+                    .path(path)
+                    .path("post")
+                    .path("requestBody")
+                    .path("content");
+            for (JsonNode media : content) {
+                assertEquals(
+                        "#/components/schemas/RecordSubmission",
+                        media.path("schema").path("$ref").asText());
+                assertEquals(3, media.path("examples").size());
+            }
+        }
+    }
+
+    @Test
+    void documentedExamplesShouldValidateAndIngestAsDescribed() throws IOException {
+        JsonNode examples = openApiDocument()
+                .path("paths")
+                .path("/records")
+                .path("post")
+                .path("requestBody")
+                .path("content")
+                .path("application/json")
+                .path("examples");
+        for (String name : List.of("dataset", "model", "incomplete")) {
+            JsonNode record = examples.path(name).path("value");
+            boolean conforms = !"incomplete".equals(name);
+            given().contentType(ContentType.JSON)
+                    .body(record.toString())
+                    .when()
+                    .post("/records/validate")
+                    .then()
+                    .statusCode(conforms ? 200 : 422)
+                    .body("conforms", equalTo(conforms));
+            given().contentType(ContentType.JSON)
+                    .body(record.toString())
+                    .when()
+                    .post("/records")
+                    .then()
+                    .statusCode(201)
+                    .body("recordStatus", equalTo(conforms ? "VALIDATED" : "INCOMPLETE"));
+        }
+    }
+
+    @Test
+    void shouldDescribeTheDatasetWriteContractSeparatelyFromStoredEntities() throws IOException {
+        JsonNode document = openApiDocument();
+        JsonNode request = document.path("paths")
+                .path("/api/v1/datasets")
+                .path("post")
+                .path("requestBody")
+                .path("content")
+                .path("application/json")
+                .path("schema");
+        assertEquals("#/components/schemas/DatasetRequest", request.path("$ref").asText());
+        assertTrue(document.path("paths")
+                .path("/api/v1/datasets")
+                .path("post")
+                .path("requestBody")
+                .path("required")
+                .asBoolean());
+        JsonNode schema = document.path("components").path("schemas").path("DatasetRequest");
+        Set<String> required = new HashSet<>();
+        schema.path("required").forEach(field -> required.add(field.asText()));
+        assertEquals(Set.of("qualifiedName", "name"), required);
+        assertEquals(
+                "\\S", schema.path("properties").path("name").path("pattern").asText());
+        for (String field : List.of(
+                "guid",
+                "typeName",
+                "recordStatus",
+                "rawJsonLd",
+                "validationIssues",
+                "sha256",
+                "validatedBy",
+                "validatedAt",
+                "carryingVerdictFields")) {
+            assertFalse(schema.path("properties").has(field), "Server-owned field in dataset request: " + field);
+        }
+
+        // The response DTO still describes stored lifecycle fields; only the write contract changes.
+        assertTrue(document.path("components")
+                .path("schemas")
+                .path("SourcelumeDatasetDto")
+                .path("properties")
+                .has("recordStatus"));
+        for (String field : required) {
+            var body = objectMapper
+                    .createObjectNode()
+                    .put("qualifiedName", "https://example.org/datasets/missing-required-field")
+                    .put("name", "Example dataset");
+            body.remove(field);
+            given().contentType(ContentType.JSON)
+                    .body(body.toString())
+                    .when()
+                    .post("/api/v1/datasets")
+                    .then()
+                    .statusCode(400)
+                    .body("error", equalTo(field + " is required"));
+        }
+    }
+
+    private JsonNode openApiDocument() throws IOException {
+        return objectMapper.readTree(given().queryParam("format", "json")
+                .when()
+                .get("/q/openapi")
+                .then()
+                .statusCode(200)
+                .extract()
+                .asString());
+    }
 
     @Test
     void shouldDocumentRecordEndpoints() {

@@ -44,7 +44,6 @@ import org.apache.sourcelume.registry.core.ingest.IngestResult;
 import org.apache.sourcelume.registry.core.ingest.IngestService;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.headers.Header;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -95,10 +94,15 @@ public class IngestResource {
                     + " corrected by resubmitting).")
     @RequestBody(
             required = true,
-            description = "A Sourcelume ProvenanceRecord as JSON-LD",
+            description = "A dataset or model provenance record as JSON-LD. Records with a nonblank id that fail"
+                    + " spec validation are also accepted and stored as INCOMPLETE with their validation issues.",
             content = {
-                @Content(mediaType = "application/ld+json", schema = @Schema(type = SchemaType.OBJECT)),
-                @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(type = SchemaType.OBJECT))
+                @Content(
+                        mediaType = "application/ld+json",
+                        schema = @Schema(ref = "#/components/schemas/RecordSubmission")),
+                @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(ref = "#/components/schemas/RecordSubmission"))
             })
     @APIResponse(
             responseCode = "201",

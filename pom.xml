@@ -74,6 +74,7 @@
 
     <!-- Dependency versions: no framework BOM, the core is framework-free -->
     <jackson.version>2.18.4</jackson.version>
+    <!-- Standalone common-module validation baseline; runtime validation is owned by its framework BOM. -->
     <jakarta.validation.version>3.0.2</jakarta.validation.version>
     <hibernate-validator.version>8.0.1.Final</hibernate-validator.version>
     <expressly.version>5.0.0</expressly.version>
@@ -114,21 +115,6 @@
         <groupId>org.apache.sourcelume</groupId>
         <artifactId>sourcelume-spec</artifactId>
         <version>${sourcelume-spec.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>jakarta.validation</groupId>
-        <artifactId>jakarta.validation-api</artifactId>
-        <version>${jakarta.validation.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.hibernate.validator</groupId>
-        <artifactId>hibernate-validator</artifactId>
-        <version>${hibernate-validator.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.glassfish.expressly</groupId>
-        <artifactId>expressly</artifactId>
-        <version>${expressly.version}</version>
       </dependency>
       <dependency>
         <groupId>org.slf4j</groupId>
