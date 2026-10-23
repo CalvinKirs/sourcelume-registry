@@ -46,6 +46,7 @@ import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.headers.Header;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.ExampleObject;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
@@ -99,10 +100,20 @@ public class IngestResource {
             content = {
                 @Content(
                         mediaType = "application/ld+json",
-                        schema = @Schema(ref = "#/components/schemas/RecordSubmission")),
+                        schema = @Schema(ref = "#/components/schemas/RecordSubmission"),
+                        examples = {
+                            @ExampleObject(name = "dataset", ref = "#/components/examples/DatasetRecord"),
+                            @ExampleObject(name = "model", ref = "#/components/examples/TrainingRecord"),
+                            @ExampleObject(name = "incomplete", ref = "#/components/examples/IncompleteRecord")
+                        }),
                 @Content(
                         mediaType = MediaType.APPLICATION_JSON,
-                        schema = @Schema(ref = "#/components/schemas/RecordSubmission"))
+                        schema = @Schema(ref = "#/components/schemas/RecordSubmission"),
+                        examples = {
+                            @ExampleObject(name = "dataset", ref = "#/components/examples/DatasetRecord"),
+                            @ExampleObject(name = "model", ref = "#/components/examples/TrainingRecord"),
+                            @ExampleObject(name = "incomplete", ref = "#/components/examples/IncompleteRecord")
+                        })
             })
     @APIResponse(
             responseCode = "201",

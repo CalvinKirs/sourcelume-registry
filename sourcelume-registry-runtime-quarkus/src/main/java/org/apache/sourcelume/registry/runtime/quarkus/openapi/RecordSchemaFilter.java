@@ -64,26 +64,27 @@ public class RecordSchemaFilter implements OASFilter {
         openAPI.getComponents().addSchema("IncompleteRecordSubmission", incomplete);
         submission.addAnyOf(reference("IncompleteRecordSubmission"));
         openAPI.getComponents().addSchema("RecordSubmission", submission);
+        openAPI.getComponents()
+                .addSchema(
+                        "RecordValidationRequest",
+                        OASFactory.createSchema()
+                                .description("Any JSON document to check against the ProvenanceRecord or"
+                                        + " TrainingProvenanceRecord schema. No record fields are required before"
+                                        + " validation; non-conforming documents return 422 with validation issues."));
 
-        for (String path : List.of("/records", "/records/validate")) {
-            openAPI.getPaths()
-                    .getPathItem(path)
-                    .getPOST()
-                    .getRequestBody()
-                    .getContent()
-                    .getMediaTypes()
-                    .values()
-                    .forEach(media -> {
-                        media.addExample("dataset", example("Dataset provenance", "openapi/dataset-record.jsonld"));
-                        media.addExample(
-                                "model", example("Model training provenance", "openapi/training-record.jsonld"));
-                        media.addExample(
-                                "incomplete",
-                                OASFactory.createExample()
-                                        .summary("Incomplete record: returns validation issues")
-                                        .value(Map.of("id", "https://example.org/records/incomplete")));
-                    });
-        }
+        openAPI.getComponents()
+                .addExample("DatasetRecord", example("Dataset provenance", "openapi/dataset-record.jsonld"))
+                .addExample("TrainingRecord", example("Model training provenance", "openapi/training-record.jsonld"))
+                .addExample(
+                        "IncompleteRecord",
+                        OASFactory.createExample()
+                                .summary("Incomplete record: returns validation issues")
+                                .value(Map.of("id", "https://example.org/records/incomplete")))
+                .addExample(
+                        "MissingRecordId",
+                        OASFactory.createExample()
+                                .summary("Missing id: pre-flight returns 422; cannot be stored")
+                                .value(Map.of("type", "ProvenanceRecord")));
     }
 
     private static Schema reference(String name) {

@@ -509,6 +509,57 @@ components:
       - $ref: "#/components/schemas/ProvenanceRecord"
       - $ref: "#/components/schemas/TrainingProvenanceRecord"
       - $ref: "#/components/schemas/IncompleteRecordSubmission"
+    RecordValidationRequest:
+      description: Any JSON document to check against the ProvenanceRecord or TrainingProvenanceRecord
+        schema. No record fields are required before validation; non-conforming documents
+        return 422 with validation issues.
+  examples:
+    DatasetRecord:
+      summary: Dataset provenance
+      value:
+        '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
+        id: https://example.org/records/dataset-v1
+        type: ProvenanceRecord
+        identifier: https://example.org/datasets/example-v1
+        name: Example dataset
+        license: https://www.apache.org/licenses/LICENSE-2.0
+        creator:
+        - type: schema:Organization
+          name: Example Organization
+        created: 2026-10-01T00:00:00Z
+        added: 2026-10-01T00:00:00Z
+        contentCreated: 2026-10-01T00:00:00Z
+        origin: An example dataset published by its producer.
+        custodyChain:
+        - agent: https://example.org/
+          action: created
+          startTime: 2026-10-01T00:00:00Z
+    TrainingRecord:
+      summary: Model training provenance
+      value:
+        '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
+        id: https://example.org/records/model-v1
+        type: TrainingProvenanceRecord
+        identifier: https://example.org/models/example-v1
+        name: Example model
+        creator:
+        - type: schema:Organization
+          name: Example Organization
+        created: 2026-10-01T00:00:00Z
+        disclosure: complete
+        trainingData:
+        - dataset: https://example.org/records/dataset-v1
+          phase: pretraining
+          tokens: 1000
+          share: 1.0
+    IncompleteRecord:
+      summary: "Incomplete record: returns validation issues"
+      value:
+        id: https://example.org/records/incomplete
+    MissingRecordId:
+      summary: "Missing id: pre-flight returns 422; cannot be stored"
+      value:
+        type: ProvenanceRecord
 tags:
 - name: Datasets
   description: Plain dataset entities; provenance records are managed via /records
@@ -687,97 +738,25 @@ paths:
           INCOMPLETE with their validation issues.
         content:
           application/ld+json:
-            schema:
-              $ref: "#/components/schemas/RecordSubmission"
             examples:
               dataset:
-                summary: Dataset provenance
-                value:
-                  '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
-                  id: https://example.org/records/dataset-v1
-                  type: ProvenanceRecord
-                  identifier: https://example.org/datasets/example-v1
-                  name: Example dataset
-                  license: https://www.apache.org/licenses/LICENSE-2.0
-                  creator:
-                  - type: schema:Organization
-                    name: Example Organization
-                  created: 2026-10-01T00:00:00Z
-                  added: 2026-10-01T00:00:00Z
-                  contentCreated: 2026-10-01T00:00:00Z
-                  origin: An example dataset published by its producer.
-                  custodyChain:
-                  - agent: https://example.org/
-                    action: created
-                    startTime: 2026-10-01T00:00:00Z
+                $ref: "#/components/examples/DatasetRecord"
               model:
-                summary: Model training provenance
-                value:
-                  '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
-                  id: https://example.org/records/model-v1
-                  type: TrainingProvenanceRecord
-                  identifier: https://example.org/models/example-v1
-                  name: Example model
-                  creator:
-                  - type: schema:Organization
-                    name: Example Organization
-                  created: 2026-10-01T00:00:00Z
-                  disclosure: complete
-                  trainingData:
-                  - dataset: https://example.org/records/dataset-v1
-                    phase: pretraining
-                    tokens: 1000
-                    share: 1.0
+                $ref: "#/components/examples/TrainingRecord"
               incomplete:
-                summary: "Incomplete record: returns validation issues"
-                value:
-                  id: https://example.org/records/incomplete
+                $ref: "#/components/examples/IncompleteRecord"
+            schema:
+              $ref: "#/components/schemas/RecordSubmission"
           application/json:
-            schema:
-              $ref: "#/components/schemas/RecordSubmission"
             examples:
               dataset:
-                summary: Dataset provenance
-                value:
-                  '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
-                  id: https://example.org/records/dataset-v1
-                  type: ProvenanceRecord
-                  identifier: https://example.org/datasets/example-v1
-                  name: Example dataset
-                  license: https://www.apache.org/licenses/LICENSE-2.0
-                  creator:
-                  - type: schema:Organization
-                    name: Example Organization
-                  created: 2026-10-01T00:00:00Z
-                  added: 2026-10-01T00:00:00Z
-                  contentCreated: 2026-10-01T00:00:00Z
-                  origin: An example dataset published by its producer.
-                  custodyChain:
-                  - agent: https://example.org/
-                    action: created
-                    startTime: 2026-10-01T00:00:00Z
+                $ref: "#/components/examples/DatasetRecord"
               model:
-                summary: Model training provenance
-                value:
-                  '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
-                  id: https://example.org/records/model-v1
-                  type: TrainingProvenanceRecord
-                  identifier: https://example.org/models/example-v1
-                  name: Example model
-                  creator:
-                  - type: schema:Organization
-                    name: Example Organization
-                  created: 2026-10-01T00:00:00Z
-                  disclosure: complete
-                  trainingData:
-                  - dataset: https://example.org/records/dataset-v1
-                    phase: pretraining
-                    tokens: 1000
-                    share: 1.0
+                $ref: "#/components/examples/TrainingRecord"
               incomplete:
-                summary: "Incomplete record: returns validation issues"
-                value:
-                  id: https://example.org/records/incomplete
+                $ref: "#/components/examples/IncompleteRecord"
+            schema:
+              $ref: "#/components/schemas/RecordSubmission"
         required: true
       responses:
         "201":
@@ -825,51 +804,17 @@ paths:
           \ records, including records without an id, return 422 with validation issues."
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/RecordSubmission"
             examples:
               dataset:
-                summary: Dataset provenance
-                value:
-                  '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
-                  id: https://example.org/records/dataset-v1
-                  type: ProvenanceRecord
-                  identifier: https://example.org/datasets/example-v1
-                  name: Example dataset
-                  license: https://www.apache.org/licenses/LICENSE-2.0
-                  creator:
-                  - type: schema:Organization
-                    name: Example Organization
-                  created: 2026-10-01T00:00:00Z
-                  added: 2026-10-01T00:00:00Z
-                  contentCreated: 2026-10-01T00:00:00Z
-                  origin: An example dataset published by its producer.
-                  custodyChain:
-                  - agent: https://example.org/
-                    action: created
-                    startTime: 2026-10-01T00:00:00Z
+                $ref: "#/components/examples/DatasetRecord"
               model:
-                summary: Model training provenance
-                value:
-                  '@context': https://sourcelume.apache.org/context/0.0.1/sourcelume.jsonld
-                  id: https://example.org/records/model-v1
-                  type: TrainingProvenanceRecord
-                  identifier: https://example.org/models/example-v1
-                  name: Example model
-                  creator:
-                  - type: schema:Organization
-                    name: Example Organization
-                  created: 2026-10-01T00:00:00Z
-                  disclosure: complete
-                  trainingData:
-                  - dataset: https://example.org/records/dataset-v1
-                    phase: pretraining
-                    tokens: 1000
-                    share: 1.0
+                $ref: "#/components/examples/TrainingRecord"
               incomplete:
-                summary: "Incomplete record: returns validation issues"
-                value:
-                  id: https://example.org/records/incomplete
+                $ref: "#/components/examples/IncompleteRecord"
+              missingId:
+                $ref: "#/components/examples/MissingRecordId"
+            schema:
+              $ref: "#/components/schemas/RecordValidationRequest"
         required: true
       responses:
         "200":
