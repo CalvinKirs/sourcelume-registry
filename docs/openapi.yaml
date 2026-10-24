@@ -789,6 +789,8 @@ paths:
           headers:
             Location:
               description: The record's status view
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -798,6 +800,8 @@ paths:
           headers:
             Location:
               description: The record's status view
+              schema:
+                type: string
           content:
             application/json:
               schema:

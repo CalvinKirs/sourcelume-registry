@@ -255,6 +255,30 @@ class OpenApiDocumentTest {
         }
     }
 
+    @Test
+    void shouldGiveEveryResponseHeaderASchema() throws IOException {
+        // OpenAPI 3.x requires a header object to carry a schema (or content);
+        // a header with only a description makes the whole document invalid.
+        List<String> withoutSchema = new java.util.ArrayList<>();
+        openApiDocument().path("paths").properties().forEach(path -> path.getValue()
+                .properties()
+                .forEach(operation -> operation
+                        .getValue()
+                        .path("responses")
+                        .properties()
+                        .forEach(response -> response.getValue()
+                                .path("headers")
+                                .properties()
+                                .forEach(header -> {
+                                    if (!header.getValue().has("schema")
+                                            && !header.getValue().has("content")) {
+                                        withoutSchema.add(path.getKey() + " " + operation.getKey() + " "
+                                                + response.getKey() + " " + header.getKey());
+                                    }
+                                }))));
+        assertTrue(withoutSchema.isEmpty(), "response headers without a schema: " + withoutSchema);
+    }
+
     private JsonNode openApiDocument() throws IOException {
         return objectMapper.readTree(given().queryParam("format", "json")
                 .when()
