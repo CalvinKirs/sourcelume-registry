@@ -165,18 +165,14 @@ public class IngestResource {
         List<RecordEntityDto> replaceableStubs = new ArrayList<>();
         for (RecordEntityDto entity : stored) {
             if (entity.getRecordStatus() == RecordStatus.VALIDATED) {
-                return Response.status(409)
-                        .entity(new ConflictResponse(recordId, entity.getRecordStatus()))
-                        .build();
+                return conflict(recordId, entity);
             }
             if (entityType.equals(entity.getTypeName())) {
                 existing = entity;
             } else if (entity.getRecordStatus() == RecordStatus.INCOMPLETE) {
                 replaceableStubs.add(entity);
             } else {
-                return Response.status(409)
-                        .entity(new ConflictResponse(recordId, entity.getRecordStatus()))
-                        .build();
+                return conflict(recordId, entity);
             }
         }
         for (RecordEntityDto stub : replaceableStubs) {
@@ -305,8 +301,24 @@ public class IngestResource {
         }
     }
 
-    /** Wire DTO for the 409 response: what is in the way, and in which state. */
-    public record ConflictResponse(String qualifiedName, RecordStatus recordStatus) {}
+    /** The 409 for an id that an existing entity keeps this submission from taking. */
+    private static Response conflict(String recordId, RecordEntityDto blocking) {
+        String reason = blocking.getRecordStatus() == RecordStatus.VALIDATED
+                ? "The id belongs to a VALIDATED record, which never changes; publish a changed record under a new id"
+                : "The id is taken by a plain dataset entity that is not a provenance record; "
+                        + "POST /records cannot replace it under another record type";
+        return Response.status(409)
+                .entity(new ConflictResponse(recordId, blocking.getRecordStatus(), blocking.getTypeName(), reason))
+                .build();
+    }
+
+    /**
+     * Wire DTO for the 409 response: what is in the way — its state (absent
+     * for a plain dataset that carries no record status) and the store
+     * (entity type) it lives in — and why that blocks the submission.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record ConflictResponse(String qualifiedName, RecordStatus recordStatus, String entityType, String reason) {}
 
     /**
      * Wire DTO for the status view of a stored record. Absent fields mean

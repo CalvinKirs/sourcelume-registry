@@ -200,6 +200,32 @@ class IngestResourceTest {
         IngestResource.ConflictResponse body = (IngestResource.ConflictResponse) response.getEntity();
         assertEquals(RECORD_ID, body.qualifiedName());
         assertEquals(RecordStatus.VALIDATED, body.recordStatus());
+        assertEquals(SourcelumeDatasetDto.TYPE_NAME, body.entityType(), "names the store that holds the id");
+        assertTrue(body.reason().contains("VALIDATED"), body.reason());
+        assertNull(
+                fake.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, RECORD_ID),
+                "no second record may be created under a taken id");
+    }
+
+    /**
+     * A plain dataset (no record status) on the id keeps a training record
+     * out, and the 409 says why: there is no status to read the cause from.
+     */
+    @Test
+    void trainingRecordUnderAPlainDatasetIdIsRejectedWithItsReason() {
+        SourcelumeDatasetDto plain = new SourcelumeDatasetDto();
+        plain.setQualifiedName(RECORD_ID);
+        plain.setName("plain dataset");
+        fake.createOrUpdateRecordEntity(plain);
+
+        var response = resource.submit(TRAINING_RECORD.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(409, response.getStatus());
+        IngestResource.ConflictResponse body = (IngestResource.ConflictResponse) response.getEntity();
+        assertEquals(RECORD_ID, body.qualifiedName());
+        assertNull(body.recordStatus(), "a plain dataset has no record status");
+        assertEquals(SourcelumeDatasetDto.TYPE_NAME, body.entityType());
+        assertTrue(body.reason().contains("plain dataset"), body.reason());
         assertNull(
                 fake.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, RECORD_ID),
                 "no second record may be created under a taken id");
@@ -215,6 +241,8 @@ class IngestResourceTest {
         IngestResource.ConflictResponse body = (IngestResource.ConflictResponse) response.getEntity();
         assertEquals(RECORD_ID, body.qualifiedName());
         assertEquals(RecordStatus.VALIDATED, body.recordStatus());
+        assertEquals(SourcelumeDatasetDto.TYPE_NAME, body.entityType());
+        assertTrue(body.reason().contains("new id"), "tells the client what to do instead: " + body.reason());
     }
 
     @Test
