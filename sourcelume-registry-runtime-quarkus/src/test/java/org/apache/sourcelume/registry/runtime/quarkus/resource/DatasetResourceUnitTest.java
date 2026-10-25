@@ -23,9 +23,7 @@ import java.util.List;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
-import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
-import org.apache.sourcelume.registry.runtime.quarkus.resource.DatasetResource.DatasetRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -101,84 +99,9 @@ class DatasetResourceUnitTest {
         assertEquals(Response.Status.NOT_FOUND.getStatusCode(), notFound.getStatus());
     }
 
-    @Test
-    void testCreateDatasetMapsTheWritableAttributes() {
-        DatasetRequest request = plainRequest("sourcelume://datasets/test");
-        request.description = "A dataset description";
-        request.sourceUri = "https://example.org/datasets/test";
-        request.licenseId = "Apache-2.0";
-
-        Response response = resource.createOrUpdateDataset(request);
-
-        assertEquals(Response.Status.CREATED.getStatusCode(), response.getStatus());
-        SourcelumeDatasetDto dataset = (SourcelumeDatasetDto) response.getEntity();
-        assertEquals(request.qualifiedName, dataset.getQualifiedName());
-        assertEquals(request.name, dataset.getName());
-        assertEquals(request.description, dataset.getDescription());
-        assertEquals(request.sourceUri, dataset.getSourceUri());
-        assertEquals(request.licenseId, dataset.getLicenseId());
-        assertEquals("guid-created", dataset.getGuid());
-    }
-
-    @Test
-    void testCreateOrUpdateDatasetRefusesToOverwriteProvenanceRecords() {
-        for (RecordStatus status : RecordStatus.values()) {
-            SourcelumeDatasetDto record = plainDataset("https://example.org/records/r1");
-            record.setRecordStatus(status);
-            adapter.storedByQName = record;
-
-            Response response = resource.createOrUpdateDataset(plainRequest("https://example.org/records/r1"));
-
-            assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
-        }
-        assertEquals(0, adapter.writes);
-    }
-
-    @Test
-    void testCreateOrUpdateDatasetRefusesToShadowARecordOfAnotherType() {
-        // The 409 guard must see records in every store: a plain
-        // dataset written under a model record's id would shadow it,
-        // and GET /records/{id} would answer the shadow.
-        SourcelumeModelDto record = new SourcelumeModelDto();
-        record.setQualifiedName("https://example.org/records/model-r1");
-        record.setName("Model record");
-        record.setRecordStatus(RecordStatus.VALIDATED);
-        adapter.storedByQName = record;
-
-        Response response = resource.createOrUpdateDataset(plainRequest("https://example.org/records/model-r1"));
-
-        assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
-        assertEquals(0, adapter.writes);
-    }
-
-    @Test
-    void testCreateOrUpdateDatasetUpdatesExistingPlainDataset() {
-        adapter.storedByQName = plainDataset("sourcelume://datasets/test");
-
-        Response response = resource.createOrUpdateDataset(plainRequest("sourcelume://datasets/test"));
-
-        assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-        assertEquals(1, adapter.writes);
-    }
-
-    private static DatasetRequest plainRequest(String qualifiedName) {
-        DatasetRequest request = new DatasetRequest();
-        request.qualifiedName = qualifiedName;
-        request.name = "Test";
-        return request;
-    }
-
-    private static SourcelumeDatasetDto plainDataset(String qualifiedName) {
-        SourcelumeDatasetDto dataset = new SourcelumeDatasetDto();
-        dataset.setQualifiedName(qualifiedName);
-        dataset.setName("Test");
-        return dataset;
-    }
-
     private static class StubAtlasAdapter implements AtlasAdapter {
         RecordEntityDto storedByQName;
         SourcelumeDatasetDto datasetByGuid;
-        int writes;
 
         @Override
         public boolean isServerReady() {
@@ -197,7 +120,6 @@ class DatasetResourceUnitTest {
 
         @Override
         public String createOrUpdateRecordEntity(RecordEntityDto record) {
-            writes++;
             return "guid-created";
         }
 

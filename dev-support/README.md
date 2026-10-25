@@ -318,22 +318,16 @@ curl -s -u admin:atlasR0cks! \
 
 #### 4. Testing dataset operations directly in Sourcelume Registry
 
-Sourcelume exposes high-level REST endpoints on port `8082`:
+Sourcelume exposes high-level REST endpoints on port `8082`. Records are written via `POST /records`; `/api/v1/datasets` offers read-only views:
 
 ```bash
-# Create or update a dataset via Sourcelume REST API
-curl -s -X POST http://localhost:8082/api/v1/datasets \
-  -H "Content-Type: application/json" \
-  -d '{
-    "qualifiedName": "sourcelume://datasets/demo-1",
-    "name": "Demo Dataset 1",
-    "description": "Demo dataset managed through Sourcelume Registry",
-    "sourceUri": "https://github.com/apache/sourcelume-registry",
-    "licenseId": "Apache-2.0"
-  }' | jq .
+# Publish a dataset record (the only way to write one)
+curl -s -X POST http://localhost:8082/records \
+  -H "Content-Type: application/ld+json" \
+  --data-binary @examples/simple-demo/sample-provenance-record.jsonld | jq .
 
-# Fetch dataset by qualifiedName (query param)
-curl -s "http://localhost:8082/api/v1/datasets?qualifiedName=sourcelume://datasets/demo-1" | jq .
+# Query by qualifiedName (the record's id; query parameter)
+curl -s "http://localhost:8082/api/v1/datasets?qualifiedName=https://sourcelume.apache.org/records/rec-glasgow-hackathon-001" | jq .
 
 # Fetch dataset by GUID
 curl -s "http://localhost:8082/api/v1/datasets/guid/<ASSIGNED_GUID>" | jq .

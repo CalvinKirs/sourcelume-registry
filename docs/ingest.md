@@ -93,6 +93,8 @@ GET status view both report the context.
 
 ## REST semantics
 
+An id denotes one record. Records are written only via `POST /records`; `/api/v1/datasets` is read-only (`GET` by `qualifiedName`, path or GUID).
+
 | Request | Result |
 |---|---|
 | `POST /records` (JSON-LD body) | `201` new record, `200` resubmission — body: `qualifiedName`, `type`, `recordStatus`, `sha256`, `validatedBy`, `validatedAt`, and for `INCOMPLETE` the `validationIssues` |

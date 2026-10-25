@@ -34,24 +34,6 @@ components:
       properties:
         error:
           type: string
-    DatasetRequest:
-      type: object
-      required:
-      - qualifiedName
-      - name
-      properties:
-        qualifiedName:
-          type: string
-          pattern: \S
-        name:
-          type: string
-          pattern: \S
-        description:
-          type: string
-        sourceUri:
-          type: string
-        licenseId:
-          type: string
     ErrorResponse:
       type: object
       properties:
@@ -587,7 +569,8 @@ components:
         type: ProvenanceRecord
 tags:
 - name: Datasets
-  description: Plain dataset entities; provenance records are managed via /records
+  description: Read-only views of dataset entities; provenance records are written
+    via /records
 - name: Records
   description: Submit provenance records and read their verdicts
 - name: Types
@@ -620,44 +603,6 @@ paths:
                 $ref: "#/components/schemas/DatasetErrorResponse"
         "404":
           description: No dataset for this qualifiedName
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetErrorResponse"
-    post:
-      summary: Create or update a dataset entity
-      tags:
-      - Datasets
-      requestBody:
-        description: "Plain dataset attributes. Verdict fields (recordStatus, rawJsonLd,\
-          \ validationIssues, sha256, validatedBy, validatedAt) are set by the registry\
-          \ and rejected."
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetRequest"
-        required: true
-      responses:
-        "201":
-          description: "Dataset stored, with its assigned GUID"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SourcelumeDatasetDto"
-        "200":
-          description: "Existing dataset updated, with its assigned GUID"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SourcelumeDatasetDto"
-        "400":
-          description: "Missing qualifiedName or name, or verdict fields set"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetErrorResponse"
-        "409":
-          description: The qualifiedName is a provenance record; use POST /records
           content:
             application/json:
               schema:

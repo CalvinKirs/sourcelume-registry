@@ -229,35 +229,6 @@ class IngestPipelineIT {
                 "the dataset stub must be deleted, not shadowed");
     }
 
-    /**
-     * The 409 guard on {@code POST /api/v1/datasets} sees records in every
-     * store: a plain dataset entity under a model record's id would shadow
-     * it, and the status view would answer the shadow.
-     */
-    @Test
-    void datasetEndpointCannotShadowAModelRecord() throws Exception {
-        String recordId = uniqueId("model-guard");
-        String training = fixture("/records/it-training-valid.jsonld", recordId);
-        given().contentType("application/ld+json")
-                .body(training)
-                .when()
-                .post("/records")
-                .then()
-                .statusCode(201);
-
-        given().contentType("application/json")
-                .body("{\"qualifiedName\": \"" + recordId + "\", \"name\": \"shadow\"}")
-                .when()
-                .post("/api/v1/datasets")
-                .then()
-                .statusCode(409);
-
-        // The model record itself stays readable through the status view.
-        SourcelumeModelDto stored = (SourcelumeModelDto)
-                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, recordId);
-        assertEquals(RecordStatus.VALIDATED, stored.getRecordStatus());
-    }
-
     @Test
     void bootstrapIsIdempotentOnAnExistingTypeDef() {
         // The app boot already registered the type definitions; a second
