@@ -49,6 +49,7 @@ import org.apache.sourcelume.registry.core.ingest.IngestResult;
 import org.apache.sourcelume.registry.core.ingest.IngestService;
 import org.apache.sourcelume.registry.core.validation.ValidationResult;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.headers.Header;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.ExampleObject;
@@ -127,12 +128,20 @@ public class IngestResource {
     @APIResponse(
             responseCode = "201",
             description = "New record stored with its verdict",
-            headers = @Header(name = "Location", description = "The record's status view"),
+            headers =
+                    @Header(
+                            name = "Location",
+                            description = "The record's status view",
+                            schema = @Schema(type = SchemaType.STRING)),
             content = @Content(schema = @Schema(implementation = IngestResponse.class)))
     @APIResponse(
             responseCode = "200",
             description = "Existing record resubmitted and stored with its new verdict",
-            headers = @Header(name = "Location", description = "The record's status view"),
+            headers =
+                    @Header(
+                            name = "Location",
+                            description = "The record's status view",
+                            schema = @Schema(type = SchemaType.STRING)),
             content = @Content(schema = @Schema(implementation = IngestResponse.class)))
     @APIResponse(
             responseCode = "400",
