@@ -29,6 +29,19 @@ components:
           type: string
         reason:
           type: string
+    CustodyEventResponse:
+      type: object
+      properties:
+        agent:
+          type: string
+        action:
+          type: string
+        startTime:
+          type: string
+        recordStatus:
+          $ref: "#/components/schemas/RecordStatus"
+        lookupFailed:
+          type: boolean
     DatasetErrorResponse:
       type: object
       properties:
@@ -110,6 +123,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TrainingDataResponse"
+        custodyChain:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustodyEventResponse"
         validationIssues:
           type: string
         sha256:
@@ -862,8 +879,10 @@ paths:
     get:
       summary: Get a record's stored state and verdict
       description: "For a VALIDATED TrainingProvenanceRecord, each trainingData entry\
-        \ also reports the current status of the referenced dataset record, looked\
-        \ up at read time."
+        \ also reports the current status of the referenced dataset record; for a\
+        \ VALIDATED ProvenanceRecord, each custodyChain event reports the current\
+        \ status of the record its agent names, if any. Both are looked up at read\
+        \ time."
       tags:
       - Records
       parameters:
