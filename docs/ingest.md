@@ -48,16 +48,16 @@ one backend lookup, so the read gets slower the more datasets a record
 lists.
 
 A `ProvenanceRecord`'s `custodyChain` agents are resolved the same way.
-An agent may be the `id` of another dataset record — the spec links
-records as a graph instead of nesting one inside another — or an
-external identifier such as an organization's homepage. `GET
+An agent may be the `id` of any record — a dataset, or a model that
+rewrote the data — or an external identifier such as an organization's
+homepage. An IRI denotes exactly one record, of one type, so the lookup
+answers with that one record whatever store holds it. `GET
 /records/{id}` on a VALIDATED dataset record lists each `custodyChain`
-event with the current `recordStatus` of the record held under its
-agent's IRI, absent when there is none (`lookupFailed: true` when the
-backend could not be asked). Each distinct agent is one backend lookup.
-Only dataset records are looked up: an agent that names a model, such
-as a model that rewrote the data, reports no `recordStatus` even if the
-registry holds a `TrainingProvenanceRecord` under that IRI.
+event with that record's current `recordStatus`, absent when the IRI
+denotes no record (`lookupFailed: true` when the backend could not be
+asked). The lookup goes one hop and reports status only; nothing is
+stored on either record. Each distinct agent is one backend lookup per
+record store.
 
 A submission whose `type` is absent or unknown still gets its verdict:
 it fails validation (there is no schema for it) and lands as

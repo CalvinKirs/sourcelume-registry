@@ -282,11 +282,13 @@ public class IngestResource {
         if (entries == null) {
             return null;
         }
-        Map<String, DatasetState> states = lookUpDatasetRecords(
-                entries.stream().map(TrainingDataEntryDto::getDataset).toList());
+        // The spec makes trainingData entries dataset records.
+        Map<String, RecordState> states = lookUpRecords(
+                entries.stream().map(TrainingDataEntryDto::getDataset).toList(),
+                List.of(SourcelumeDatasetDto.TYPE_NAME));
         List<TrainingDataResponse> resolved = new ArrayList<>();
         for (TrainingDataEntryDto entry : entries) {
-            DatasetState state = states.get(entry.getDataset());
+            RecordState state = states.get(entry.getDataset());
             resolved.add(new TrainingDataResponse(
                     entry.getDataset(),
                     entry.getPhase(),
@@ -300,22 +302,22 @@ public class IngestResource {
 
     /**
      * Resolves a dataset record's {@code custodyChain} agents at read
-     * time: an agent may be the id of another ProvenanceRecord (the spec
-     * links records as a graph, not by nesting them), so each agent gets
-     * the state the registry holds a record under its IRI in now — absent
-     * for an agent that is not a record, such as an organization's
-     * homepage. Nothing is stored on the dataset entity.
+     * time: an agent may be the id of any Sourcelume record — a dataset,
+     * or a model that rewrote the data — so each agent gets the state of
+     * the one record its IRI denotes, whatever its type, absent for an
+     * agent that is not a record, such as an organization's homepage.
+     * Nothing is stored on the dataset entity.
      */
     private List<CustodyEventResponse> resolveCustodyChain(String rawJsonLd) {
         List<CustodyEventDto> events = ProvenanceRecordMapper.map(rawJsonLd).getCustodyChain();
         if (events == null) {
             return null;
         }
-        Map<String, DatasetState> states = lookUpDatasetRecords(
-                events.stream().map(CustodyEventDto::getAgent).toList());
+        Map<String, RecordState> states =
+                lookUpRecords(events.stream().map(CustodyEventDto::getAgent).toList(), RecordType.entityTypeNames());
         List<CustodyEventResponse> resolved = new ArrayList<>();
         for (CustodyEventDto event : events) {
-            DatasetState state = states.get(event.getAgent());
+            RecordState state = states.get(event.getAgent());
             resolved.add(new CustodyEventResponse(
                     event.getAgent(),
                     event.getAction(),
@@ -327,21 +329,22 @@ public class IngestResource {
     }
 
     /**
-     * Looks up the dataset record held under each IRI, as it stands now.
-     * An IRI listed more than once is looked up once.
+     * Looks up the record each IRI denotes among the given entity types,
+     * as it stands now. An IRI listed more than once is looked up once.
      *
-     * <p>One lookup per distinct IRI, made one after another: the read
-     * costs grow with the number of IRIs. A failed lookup marks its IRI
-     * instead of failing the read, and the IRIs after it are marked
-     * without asking the backend: a backend that just timed out would
-     * make every further lookup wait out its own timeout.
+     * <p>One lookup per distinct IRI and entity type, made one after
+     * another: the read costs grow with the number of IRIs. A failed
+     * lookup marks its IRI instead of failing the read, and the IRIs
+     * after it are marked without asking the backend: a backend that
+     * just timed out would make every further lookup wait out its own
+     * timeout.
      */
-    private Map<String, DatasetState> lookUpDatasetRecords(List<String> iris) {
-        Map<String, DatasetState> states = new HashMap<>();
+    private Map<String, RecordState> lookUpRecords(List<String> iris, List<String> entityTypes) {
+        Map<String, RecordState> states = new HashMap<>();
         boolean backendFailed = false;
         for (String iri : iris) {
             if (!states.containsKey(iri)) {
-                DatasetState state = backendFailed ? DatasetState.FAILED : lookUpDatasetRecord(iri);
+                RecordState state = backendFailed ? RecordState.FAILED : lookUpRecord(iri, entityTypes);
                 backendFailed |= state.lookupFailed();
                 states.put(iri, state);
             }
@@ -349,18 +352,19 @@ public class IngestResource {
         return states;
     }
 
-    private DatasetState lookUpDatasetRecord(String iri) {
+    private RecordState lookUpRecord(String iri, List<String> entityTypes) {
         try {
-            RecordEntityDto record = atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, iri);
-            return new DatasetState(record == null ? null : record.getRecordStatus(), false);
+            // One IRI denotes one record, so at most one store holds it.
+            List<RecordEntityDto> found = atlasAdapter.getRecordEntitiesByQualifiedName(entityTypes, iri);
+            return new RecordState(found.isEmpty() ? null : found.get(0).getRecordStatus(), false);
         } catch (AtlasAdapterException e) {
-            log.warn("Could not look up the dataset record for '{}': {}", iri, e.getMessage());
-            return DatasetState.FAILED;
+            log.warn("Could not look up the record for '{}': {}", iri, e.getMessage());
+            return RecordState.FAILED;
         }
     }
 
-    private record DatasetState(RecordStatus recordStatus, boolean lookupFailed) {
-        static final DatasetState FAILED = new DatasetState(null, true);
+    private record RecordState(RecordStatus recordStatus, boolean lookupFailed) {
+        static final RecordState FAILED = new RecordState(null, true);
 
         /** The wire form of {@link #lookupFailed}: true, or absent. */
         Boolean lookupFailedFlag() {
@@ -536,10 +540,10 @@ public class IngestResource {
 
     /**
      * Wire DTO for one {@code custodyChain} event of a dataset record: the
-     * event as submitted, plus the state of the record held under its
-     * agent's IRI. {@code recordStatus} is absent when the agent is not a
-     * provenance record the registry holds — an external identifier such
-     * as an organization's homepage — and {@code lookupFailed} is true
+     * event as submitted, plus the state of the record its agent's IRI
+     * denotes, of any record type. {@code recordStatus} is absent when the
+     * agent is not a record the registry holds — an external identifier
+     * such as an organization's homepage — and {@code lookupFailed} is true
      * instead when the backend could not be asked.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)

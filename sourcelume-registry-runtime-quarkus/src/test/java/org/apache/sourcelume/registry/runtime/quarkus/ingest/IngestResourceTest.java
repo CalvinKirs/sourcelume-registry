@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
+import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
@@ -456,9 +457,9 @@ class IngestResourceTest {
         assertEquals(RecordStatus.INCOMPLETE, after.custodyChain().get(0).recordStatus());
     }
 
-    /** An agent named in several events is looked up once and reported for each. */
+    /** An agent named in several events is looked up once (in each record store) and reported for each. */
     @Test
-    void anAgentNamedTwiceIsLookedUpOnce() {
+    void anAgentNamedTwiceIsLookedUpOncePerStore() {
         resource.submit(datasetRecord(UPSTREAM_RECORD_ID, EXTERNAL_AGENT).getBytes(StandardCharsets.UTF_8));
         resource.submit(
                 datasetRecord(RECORD_ID, UPSTREAM_RECORD_ID, UPSTREAM_RECORD_ID).getBytes(StandardCharsets.UTF_8));
@@ -469,7 +470,33 @@ class IngestResourceTest {
 
         assertEquals(2, body.custodyChain().size());
         body.custodyChain().forEach(event -> assertEquals(RecordStatus.VALIDATED, event.recordStatus()));
-        assertEquals(1, fake.lookups.get(UPSTREAM_RECORD_ID));
+        assertEquals(RecordType.entityTypeNames().size(), fake.lookups.get(UPSTREAM_RECORD_ID));
+    }
+
+    /** One IRI denotes one record of any type: an agent that is a model record reports that record's status. */
+    @Test
+    void anAgentThatIsAModelRecordReportsItsStatus() {
+        resource.submit(modelRecord("undisclosed").getBytes(StandardCharsets.UTF_8));
+        resource.submit(datasetRecord(RECORD_ID, MODEL_RECORD_ID).getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse body =
+                (IngestResource.RecordResponse) resource.status(RECORD_ID).getEntity();
+
+        assertEquals(RecordStatus.VALIDATED, body.custodyChain().get(0).recordStatus());
+    }
+
+    /** trainingData entries are dataset records: a model record's IRI there reports no status. */
+    @Test
+    void aTrainingDataEntryIsNotResolvedToAModelRecord() {
+        resource.submit(modelRecord("undisclosed").getBytes(StandardCharsets.UTF_8));
+        String otherModel = modelRecord("complete", MODEL_RECORD_ID)
+                .replace("\"id\": \"" + MODEL_RECORD_ID + "\"", "\"id\": \"" + UPSTREAM_RECORD_ID + "\"");
+        resource.submit(otherModel.getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse body = (IngestResource.RecordResponse)
+                resource.status(UPSTREAM_RECORD_ID).getEntity();
+
+        assertNull(body.trainingData().get(0).recordStatus());
     }
 
     /** An agent the backend cannot be asked about marks only its own event; the dataset record stays readable. */
