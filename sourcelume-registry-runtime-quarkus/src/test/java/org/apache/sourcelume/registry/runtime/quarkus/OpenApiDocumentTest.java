@@ -39,9 +39,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.spec.SpecResourceLoader;
 import org.junit.jupiter.api.Test;
@@ -198,61 +196,25 @@ class OpenApiDocumentTest {
     }
 
     @Test
-    void shouldDescribeTheDatasetWriteContractSeparatelyFromStoredEntities() throws IOException {
+    void shouldDescribeDatasetsAsReadOnlyViews() throws IOException {
         JsonNode document = openApiDocument();
-        JsonNode request = document.path("paths")
-                .path("/api/v1/datasets")
-                .path("post")
-                .path("requestBody")
-                .path("content")
-                .path("application/json")
-                .path("schema");
-        assertEquals("#/components/schemas/DatasetRequest", request.path("$ref").asText());
-        assertTrue(document.path("paths")
-                .path("/api/v1/datasets")
-                .path("post")
-                .path("requestBody")
-                .path("required")
-                .asBoolean());
-        JsonNode schema = document.path("components").path("schemas").path("DatasetRequest");
-        Set<String> required = new HashSet<>();
-        schema.path("required").forEach(field -> required.add(field.asText()));
-        assertEquals(Set.of("qualifiedName", "name"), required);
-        assertEquals(
-                "\\S", schema.path("properties").path("name").path("pattern").asText());
-        for (String field : List.of(
-                "guid",
-                "typeName",
-                "recordStatus",
-                "rawJsonLd",
-                "validationIssues",
-                "sha256",
-                "validatedBy",
-                "validatedAt",
-                "carryingVerdictFields")) {
-            assertFalse(schema.path("properties").has(field), "Server-owned field in dataset request: " + field);
+        for (String path :
+                List.of("/api/v1/datasets", "/api/v1/datasets/guid/{guid}", "/api/v1/datasets/{qualifiedName}")) {
+            JsonNode operations = document.path("paths").path(path);
+            assertTrue(operations.has("get"), "GET missing on " + path);
+            for (String method : List.of("post", "put", "patch", "delete")) {
+                assertFalse(operations.has(method), method + " must not be offered on " + path);
+            }
         }
-
-        // The response DTO still describes stored lifecycle fields; only the write contract changes.
+        assertFalse(
+                document.path("components").path("schemas").has("DatasetRequest"),
+                "the dataset write contract is gone");
+        // The response DTO still describes stored lifecycle fields.
         assertTrue(document.path("components")
                 .path("schemas")
                 .path("SourcelumeDatasetDto")
                 .path("properties")
                 .has("recordStatus"));
-        for (String field : required) {
-            var body = objectMapper
-                    .createObjectNode()
-                    .put("qualifiedName", "https://example.org/datasets/missing-required-field")
-                    .put("name", "Example dataset");
-            body.remove(field);
-            given().contentType(ContentType.JSON)
-                    .body(body.toString())
-                    .when()
-                    .post("/api/v1/datasets")
-                    .then()
-                    .statusCode(400)
-                    .body("error", equalTo(field + " is required"));
-        }
     }
 
     @Test
@@ -310,7 +272,6 @@ class OpenApiDocumentTest {
                 .get("/q/openapi")
                 .then()
                 .statusCode(200)
-                .body("paths.'/api/v1/datasets'.post.responses.keySet()", hasItems("200", "201", "400", "409"))
                 .body("paths.'/api/v1/datasets'.get.responses.keySet()", hasItems("200", "400", "404"))
                 .body("paths.'/api/v1/datasets/guid/{guid}'.get.responses.keySet()", hasItems("200", "404"))
                 .body("paths.'/api/v1/types/typedefs'.get.responses", hasKey("200"));
