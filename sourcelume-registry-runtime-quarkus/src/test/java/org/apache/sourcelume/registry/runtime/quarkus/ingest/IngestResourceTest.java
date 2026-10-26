@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
+import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
@@ -79,6 +80,8 @@ class IngestResourceTest {
 
     private static final String MODEL_RECORD_ID = "https://sourcelume.apache.org/records/ingest-test-model";
     private static final String UNREGISTERED_DATASET = "https://example.org/datasets/no-record";
+    private static final String UPSTREAM_RECORD_ID = "https://sourcelume.apache.org/records/ingest-test-upstream";
+    private static final String EXTERNAL_AGENT = "https://example.org/";
 
     private final FakeAtlasAdapter fake = new FakeAtlasAdapter();
     private final IngestResource resource = new IngestResource(
@@ -409,6 +412,145 @@ class IngestResourceTest {
 
         assertEquals(RecordStatus.VALIDATED, body.recordStatus());
         assertNull(body.trainingData());
+    }
+
+    /**
+     * A VALIDATED dataset record reports each custody agent with the state
+     * of the record held under its IRI: a registered upstream record, or
+     * absent for an agent that is not a record.
+     */
+    @Test
+    void statusOfADatasetRecordResolvesItsCustodyAgents() {
+        resource.submit(datasetRecord(UPSTREAM_RECORD_ID, EXTERNAL_AGENT).getBytes(StandardCharsets.UTF_8));
+        resource.submit(
+                datasetRecord(RECORD_ID, UPSTREAM_RECORD_ID, EXTERNAL_AGENT).getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse body =
+                (IngestResource.RecordResponse) resource.status(RECORD_ID).getEntity();
+
+        assertEquals(RecordStatus.VALIDATED, body.recordStatus());
+        assertEquals(
+                List.of(
+                        new IngestResource.CustodyEventResponse(
+                                UPSTREAM_RECORD_ID, "collected", "2026-09-08T00:00:00Z", RecordStatus.VALIDATED, null),
+                        new IngestResource.CustodyEventResponse(
+                                EXTERNAL_AGENT, "collected", "2026-09-08T00:00:00Z", null, null)),
+                body.custodyChain());
+        assertNull(body.trainingData(), "a dataset record has no trainingData");
+    }
+
+    /** Nothing is stored on the dataset entity: an upstream record published later shows up on the next read. */
+    @Test
+    void custodyAgentsAreResolvedAtReadTime() {
+        resource.submit(datasetRecord(RECORD_ID, UPSTREAM_RECORD_ID).getBytes(StandardCharsets.UTF_8));
+        IngestResource.RecordResponse before =
+                (IngestResource.RecordResponse) resource.status(RECORD_ID).getEntity();
+        assertNull(before.custodyChain().get(0).recordStatus());
+
+        // No license: the upstream record lands INCOMPLETE.
+        resource.submit(datasetRecord(UPSTREAM_RECORD_ID, EXTERNAL_AGENT)
+                .replace("\"license\": \"https://www.apache.org/licenses/LICENSE-2.0\",", "")
+                .getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse after =
+                (IngestResource.RecordResponse) resource.status(RECORD_ID).getEntity();
+        assertEquals(RecordStatus.INCOMPLETE, after.custodyChain().get(0).recordStatus());
+    }
+
+    /** An agent named in several events is looked up once (in each record store) and reported for each. */
+    @Test
+    void anAgentNamedTwiceIsLookedUpOncePerStore() {
+        resource.submit(datasetRecord(UPSTREAM_RECORD_ID, EXTERNAL_AGENT).getBytes(StandardCharsets.UTF_8));
+        resource.submit(
+                datasetRecord(RECORD_ID, UPSTREAM_RECORD_ID, UPSTREAM_RECORD_ID).getBytes(StandardCharsets.UTF_8));
+        fake.lookups.clear();
+
+        IngestResource.RecordResponse body =
+                (IngestResource.RecordResponse) resource.status(RECORD_ID).getEntity();
+
+        assertEquals(2, body.custodyChain().size());
+        body.custodyChain().forEach(event -> assertEquals(RecordStatus.VALIDATED, event.recordStatus()));
+        assertEquals(RecordType.entityTypeNames().size(), fake.lookups.get(UPSTREAM_RECORD_ID));
+    }
+
+    /** One IRI denotes one record of any type: an agent that is a model record reports that record's status. */
+    @Test
+    void anAgentThatIsAModelRecordReportsItsStatus() {
+        resource.submit(modelRecord("undisclosed").getBytes(StandardCharsets.UTF_8));
+        resource.submit(datasetRecord(RECORD_ID, MODEL_RECORD_ID).getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse body =
+                (IngestResource.RecordResponse) resource.status(RECORD_ID).getEntity();
+
+        assertEquals(RecordStatus.VALIDATED, body.custodyChain().get(0).recordStatus());
+    }
+
+    /** trainingData entries are dataset records: a model record's IRI there reports no status. */
+    @Test
+    void aTrainingDataEntryIsNotResolvedToAModelRecord() {
+        resource.submit(modelRecord("undisclosed").getBytes(StandardCharsets.UTF_8));
+        String otherModel = modelRecord("complete", MODEL_RECORD_ID)
+                .replace("\"id\": \"" + MODEL_RECORD_ID + "\"", "\"id\": \"" + UPSTREAM_RECORD_ID + "\"");
+        resource.submit(otherModel.getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse body = (IngestResource.RecordResponse)
+                resource.status(UPSTREAM_RECORD_ID).getEntity();
+
+        assertNull(body.trainingData().get(0).recordStatus());
+    }
+
+    /** An agent the backend cannot be asked about marks only its own event; the dataset record stays readable. */
+    @Test
+    void aFailedAgentLookupMarksOnlyItsEvent() {
+        resource.submit(datasetRecord(UPSTREAM_RECORD_ID, EXTERNAL_AGENT).getBytes(StandardCharsets.UTF_8));
+        resource.submit(
+                datasetRecord(RECORD_ID, UPSTREAM_RECORD_ID, EXTERNAL_AGENT).getBytes(StandardCharsets.UTF_8));
+        fake.unreachable.add(EXTERNAL_AGENT);
+
+        var response = resource.status(RECORD_ID);
+
+        assertEquals(200, response.getStatus());
+        List<IngestResource.CustodyEventResponse> custodyChain =
+                ((IngestResource.RecordResponse) response.getEntity()).custodyChain();
+        assertEquals(RecordStatus.VALIDATED, custodyChain.get(0).recordStatus());
+        assertNull(custodyChain.get(0).lookupFailed());
+        assertNull(custodyChain.get(1).recordStatus());
+        assertEquals(Boolean.TRUE, custodyChain.get(1).lookupFailed());
+    }
+
+    /** Only a VALIDATED dataset record's agents are resolved; an INCOMPLETE one is not a published claim. */
+    @Test
+    void statusOfAnIncompleteDatasetRecordHasNoCustodyChain() {
+        resource.submit(INVALID_RECORD.getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse body =
+                (IngestResource.RecordResponse) resource.status(RECORD_ID).getEntity();
+
+        assertEquals(RecordStatus.INCOMPLETE, body.recordStatus());
+        assertNull(body.custodyChain());
+    }
+
+    /** A model record has no custodyChain: its datasets are reported under trainingData. */
+    @Test
+    void statusOfATrainingRecordHasNoCustodyChain() {
+        resource.submit(modelRecord("complete", RECORD_ID).getBytes(StandardCharsets.UTF_8));
+
+        IngestResource.RecordResponse body =
+                (IngestResource.RecordResponse) resource.status(MODEL_RECORD_ID).getEntity();
+
+        assertNull(body.custodyChain());
+    }
+
+    /** {@link #VALID_RECORD} under {@code id}, with one "collected" custody event per agent. */
+    private static String datasetRecord(String id, String... agents) {
+        String custodyChain = Arrays.stream(agents)
+                .map(agent -> "{ \"agent\": \"" + agent
+                        + "\", \"action\": \"collected\", \"startTime\": \"2026-09-08T00:00:00Z\" }")
+                .collect(Collectors.joining(", ", "\"custodyChain\": [ ", " ]"));
+        return VALID_RECORD
+                .replace("\"id\": \"" + RECORD_ID + "\"", "\"id\": \"" + id + "\"")
+                // The chain is the array the record closes with.
+                .replaceFirst("(?s)\"custodyChain\": \\[.*?\\](?=\\s*}\\s*$)", custodyChain);
     }
 
     /** A TrainingProvenanceRecord under {@link #MODEL_RECORD_ID}; no datasets means no trainingData list. */

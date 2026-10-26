@@ -47,6 +47,18 @@ instead when the backend could not be asked). Each distinct dataset is
 one backend lookup, so the read gets slower the more datasets a record
 lists.
 
+A `ProvenanceRecord`'s `custodyChain` agents are resolved the same way.
+An agent may be the `id` of any record — a dataset, or a model that
+rewrote the data — or an external identifier such as an organization's
+homepage. An IRI denotes exactly one record, of one type, so the lookup
+answers with that one record whatever store holds it. `GET
+/records/{id}` on a VALIDATED dataset record lists each `custodyChain`
+event with that record's current `recordStatus`, absent when the IRI
+denotes no record (`lookupFailed: true` when the backend could not be
+asked). The lookup goes one hop and reports status only; nothing is
+stored on either record. Each distinct agent is one backend lookup per
+record store.
+
 A submission whose `type` is absent or unknown still gets its verdict:
 it fails validation (there is no schema for it) and lands as
 `INCOMPLETE` on the dataset entity, where it stays curatable like any
@@ -101,7 +113,7 @@ An id denotes one record. Records are written only via `POST /records`; `/api/v1
 | `POST /records` for an id that is already VALIDATED, or taken by a plain dataset | `409` — body: `qualifiedName`, `recordStatus` (absent for a plain dataset), `entityType` (the store holding the id), `reason` |
 | `POST /records` without a usable `@id`, or unparseable | `400` |
 | `POST /records` with an unsupported content type | `415` |
-| `GET /records/{id}` | `200` record view: `type`, status, the type's mapped attributes, `trainingData` with each dataset's status for a VALIDATED model record, and for INCOMPLETE the issues + verdict context / `404` |
+| `GET /records/{id}` | `200` record view: `type`, status, the type's mapped attributes, `trainingData` with each dataset's status for a VALIDATED model record, `custodyChain` with each agent's record status for a VALIDATED dataset record, and for INCOMPLETE the issues + verdict context / `404` |
 
 The `id` of the JSON-LD document doubles as the record's qualified name;
 the `Location` header of the answers points at the (URL-encoded)

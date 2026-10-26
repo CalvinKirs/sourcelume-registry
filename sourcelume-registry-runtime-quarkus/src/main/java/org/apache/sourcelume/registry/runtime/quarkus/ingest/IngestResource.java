@@ -35,12 +35,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.sourcelume.registry.common.dto.CustodyEventDto;
 import org.apache.sourcelume.registry.common.dto.RecordEntityDto;
 import org.apache.sourcelume.registry.common.dto.RecordStatus;
 import org.apache.sourcelume.registry.common.dto.RecordType;
 import org.apache.sourcelume.registry.common.dto.SourcelumeDatasetDto;
 import org.apache.sourcelume.registry.common.dto.SourcelumeModelDto;
 import org.apache.sourcelume.registry.common.dto.TrainingProvenanceRecordDto.TrainingDataEntryDto;
+import org.apache.sourcelume.registry.common.mapper.ProvenanceRecordMapper;
 import org.apache.sourcelume.registry.common.mapper.RecordJson;
 import org.apache.sourcelume.registry.common.mapper.TrainingProvenanceRecordMapper;
 import org.apache.sourcelume.registry.core.AtlasAdapter;
@@ -230,7 +232,9 @@ public class IngestResource {
     @Operation(
             summary = "Get a record's stored state and verdict",
             description = "For a VALIDATED TrainingProvenanceRecord, each trainingData entry also reports the"
-                    + " current status of the referenced dataset record, looked up at read time.")
+                    + " current status of the referenced dataset record; for a VALIDATED ProvenanceRecord, each"
+                    + " custodyChain event reports the current status of the record its agent names, if any."
+                    + " Both are looked up at read time.")
     @APIResponse(
             responseCode = "200",
             description = "The stored record",
@@ -252,12 +256,16 @@ public class IngestResource {
                     .build();
         }
         List<TrainingDataResponse> trainingData = null;
-        if (stored instanceof SourcelumeModelDto
-                && stored.getRecordStatus() == RecordStatus.VALIDATED
-                && stored.getRawJsonLd() != null) {
-            trainingData = resolveTrainingData(stored.getRawJsonLd());
+        List<CustodyEventResponse> custodyChain = null;
+        if (stored.getRecordStatus() == RecordStatus.VALIDATED && stored.getRawJsonLd() != null) {
+            if (stored instanceof SourcelumeModelDto) {
+                trainingData = resolveTrainingData(stored.getRawJsonLd());
+            } else if (stored instanceof SourcelumeDatasetDto) {
+                custodyChain = resolveCustodyChain(stored.getRawJsonLd());
+            }
         }
-        return Response.ok(RecordResponse.of(stored, trainingData)).build();
+        return Response.ok(RecordResponse.of(stored, trainingData, custodyChain))
+                .build();
     }
 
     /**
@@ -267,13 +275,6 @@ public class IngestResource {
      * the model entity, so a dataset record published or corrected later
      * shows up on the next read. Null when the record lists no datasets
      * (an {@code undisclosed} claim).
-     *
-     * <p>One lookup per distinct dataset, made one after another: the
-     * read costs grow with the number of datasets the record lists. A
-     * failed lookup marks its entries instead of failing the read, and
-     * the datasets after it are marked without asking the backend: a
-     * backend that just timed out would make every further lookup wait
-     * out its own timeout.
      */
     private List<TrainingDataResponse> resolveTrainingData(String rawJsonLd) {
         List<TrainingDataEntryDto> entries =
@@ -281,41 +282,94 @@ public class IngestResource {
         if (entries == null) {
             return null;
         }
-        // A dataset may be listed once per training phase; look it up once.
-        Map<String, DatasetState> stateByDataset = new HashMap<>();
+        // The spec makes trainingData entries dataset records.
+        Map<String, RecordState> states = lookUpRecords(
+                entries.stream().map(TrainingDataEntryDto::getDataset).toList(),
+                List.of(SourcelumeDatasetDto.TYPE_NAME));
         List<TrainingDataResponse> resolved = new ArrayList<>();
-        boolean backendFailed = false;
         for (TrainingDataEntryDto entry : entries) {
-            DatasetState state = stateByDataset.get(entry.getDataset());
-            if (state == null) {
-                state = backendFailed ? DatasetState.FAILED : lookUpDataset(entry.getDataset());
-                backendFailed |= state.lookupFailed();
-                stateByDataset.put(entry.getDataset(), state);
-            }
+            RecordState state = states.get(entry.getDataset());
             resolved.add(new TrainingDataResponse(
                     entry.getDataset(),
                     entry.getPhase(),
                     entry.getTokens(),
                     entry.getShare(),
                     state.recordStatus(),
-                    state.lookupFailed() ? Boolean.TRUE : null));
+                    state.lookupFailedFlag()));
         }
         return resolved;
     }
 
-    private DatasetState lookUpDataset(String dataset) {
+    /**
+     * Resolves a dataset record's {@code custodyChain} agents at read
+     * time: an agent may be the id of any Sourcelume record — a dataset,
+     * or a model that rewrote the data — so each agent gets the state of
+     * the one record its IRI denotes, whatever its type, absent for an
+     * agent that is not a record, such as an organization's homepage.
+     * Nothing is stored on the dataset entity.
+     */
+    private List<CustodyEventResponse> resolveCustodyChain(String rawJsonLd) {
+        List<CustodyEventDto> events = ProvenanceRecordMapper.map(rawJsonLd).getCustodyChain();
+        if (events == null) {
+            return null;
+        }
+        Map<String, RecordState> states =
+                lookUpRecords(events.stream().map(CustodyEventDto::getAgent).toList(), RecordType.entityTypeNames());
+        List<CustodyEventResponse> resolved = new ArrayList<>();
+        for (CustodyEventDto event : events) {
+            RecordState state = states.get(event.getAgent());
+            resolved.add(new CustodyEventResponse(
+                    event.getAgent(),
+                    event.getAction(),
+                    event.getStartTime(),
+                    state.recordStatus(),
+                    state.lookupFailedFlag()));
+        }
+        return resolved;
+    }
+
+    /**
+     * Looks up the record each IRI denotes among the given entity types,
+     * as it stands now. An IRI listed more than once is looked up once.
+     *
+     * <p>One lookup per distinct IRI and entity type, made one after
+     * another: the read costs grow with the number of IRIs. A failed
+     * lookup marks its IRI instead of failing the read, and the IRIs
+     * after it are marked without asking the backend: a backend that
+     * just timed out would make every further lookup wait out its own
+     * timeout.
+     */
+    private Map<String, RecordState> lookUpRecords(List<String> iris, List<String> entityTypes) {
+        Map<String, RecordState> states = new HashMap<>();
+        boolean backendFailed = false;
+        for (String iri : iris) {
+            if (!states.containsKey(iri)) {
+                RecordState state = backendFailed ? RecordState.FAILED : lookUpRecord(iri, entityTypes);
+                backendFailed |= state.lookupFailed();
+                states.put(iri, state);
+            }
+        }
+        return states;
+    }
+
+    private RecordState lookUpRecord(String iri, List<String> entityTypes) {
         try {
-            RecordEntityDto record =
-                    atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, dataset);
-            return new DatasetState(record == null ? null : record.getRecordStatus(), false);
+            // One IRI denotes one record, so at most one store holds it.
+            List<RecordEntityDto> found = atlasAdapter.getRecordEntitiesByQualifiedName(entityTypes, iri);
+            return new RecordState(found.isEmpty() ? null : found.get(0).getRecordStatus(), false);
         } catch (AtlasAdapterException e) {
-            log.warn("Could not resolve training dataset '{}': {}", dataset, e.getMessage());
-            return DatasetState.FAILED;
+            log.warn("Could not look up the record for '{}': {}", iri, e.getMessage());
+            return RecordState.FAILED;
         }
     }
 
-    private record DatasetState(RecordStatus recordStatus, boolean lookupFailed) {
-        static final DatasetState FAILED = new DatasetState(null, true);
+    private record RecordState(RecordStatus recordStatus, boolean lookupFailed) {
+        static final RecordState FAILED = new RecordState(null, true);
+
+        /** The wire form of {@link #lookupFailed}: true, or absent. */
+        Boolean lookupFailedFlag() {
+            return lookupFailed ? Boolean.TRUE : null;
+        }
     }
 
     /**
@@ -422,12 +476,16 @@ public class IngestResource {
             String modelVersion,
             String disclosure,
             List<TrainingDataResponse> trainingData,
+            List<CustodyEventResponse> custodyChain,
             String validationIssues,
             String sha256,
             String validatedBy,
             String validatedAt) {
 
-        static RecordResponse of(RecordEntityDto record, List<TrainingDataResponse> trainingData) {
+        static RecordResponse of(
+                RecordEntityDto record,
+                List<TrainingDataResponse> trainingData,
+                List<CustodyEventResponse> custodyChain) {
             String issues = record.getValidationIssues();
             if (RecordEntityDto.CLEARED_VALIDATION_ISSUES.equals(issues)) {
                 issues = null;
@@ -459,6 +517,7 @@ public class IngestResource {
                     modelVersion,
                     disclosure,
                     trainingData,
+                    custodyChain,
                     issues,
                     record.getSha256(),
                     record.getValidatedBy(),
@@ -478,6 +537,18 @@ public class IngestResource {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record TrainingDataResponse(
             String dataset, String phase, Long tokens, Double share, RecordStatus recordStatus, Boolean lookupFailed) {}
+
+    /**
+     * Wire DTO for one {@code custodyChain} event of a dataset record: the
+     * event as submitted, plus the state of the record its agent's IRI
+     * denotes, of any record type. {@code recordStatus} is absent when the
+     * agent is not a record the registry holds — an external identifier
+     * such as an organization's homepage — and {@code lookupFailed} is true
+     * instead when the backend could not be asked.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record CustodyEventResponse(
+            String agent, String action, String startTime, RecordStatus recordStatus, Boolean lookupFailed) {}
 
     /** Wire DTO for error responses. */
     public record ErrorResponse(String message) {}
