@@ -17,20 +17,20 @@
 package org.apache.sourcelume.registry.runtime.quarkus.ingest;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
- * Container-level smoke test for the ingest endpoints: the two failure
- * paths that are decided before any Atlas round-trip — unsupported
- * content type (415, container-enforced via @Consumes) and a body
- * without a usable record id (400). The lifecycle semantics (201/200
- * verdicts, 409 on duplicates, resubmitting INCOMPLETE records, status views)
- * are covered by {@link IngestResourceTest}; the test profile has no
- * Atlas backend, so success paths would fail on the unreachable
- * backend here.
+ * HTTP contracts for ingest, using the in-memory test Atlas adapter.
+ * The full lifecycle semantics are covered by {@link IngestResourceTest}
+ * and the integration tests against a real Atlas backend.
  */
 @QuarkusTest
 class IngestResourceHttpTest {
@@ -53,5 +53,43 @@ class IngestResourceHttpTest {
                 .post("/records")
                 .then()
                 .statusCode(400);
+    }
+
+    @Test
+    void typeConflictPreservesTheOriginalVerdictOverHttp() {
+        String id = "https://sourcelume.apache.org/records/http-type-conflict-" + UUID.randomUUID();
+        String original = "{\"id\":\"" + id + "\",\"type\":\"ProvenanceRecord\"}";
+        var verdict = given().contentType(ContentType.JSON)
+                .body(original)
+                .when()
+                .post("/records")
+                .then()
+                .statusCode(201)
+                .body("recordStatus", equalTo("INCOMPLETE"))
+                .extract()
+                .jsonPath();
+
+        given().contentType(ContentType.JSON)
+                .body("{\"id\":\"" + id + "\",\"type\":\"TrainingProvenanceRecord\"}")
+                .when()
+                .post("/records")
+                .then()
+                .statusCode(409)
+                .body("qualifiedName", equalTo(id))
+                .body("entityType", equalTo("sourcelume_dataset"))
+                .body("recordStatus", equalTo("INCOMPLETE"))
+                .body("reason", containsString("new id"));
+
+        given().urlEncodingEnabled(false)
+                .when()
+                .get("/records/" + URLEncoder.encode(id, StandardCharsets.UTF_8))
+                .then()
+                .statusCode(200)
+                .body("type", equalTo("ProvenanceRecord"))
+                .body("recordStatus", equalTo("INCOMPLETE"))
+                .body("sha256", equalTo(verdict.getString("sha256")))
+                .body("validationIssues", equalTo(verdict.getString("validationIssues")))
+                .body("validatedBy", equalTo(verdict.getString("validatedBy")))
+                .body("validatedAt", equalTo(verdict.getString("validatedAt")));
     }
 }

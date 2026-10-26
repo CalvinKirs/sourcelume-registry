@@ -172,31 +172,17 @@ public class IngestResource {
         String recordTypeTerm = RecordJson.extractRecordType(rawJsonLd).orElse(null);
         String entityType = RecordType.entityTypeFor(recordTypeTerm);
 
-        // But the id names one record whichever store it landed in, so
-        // the guard looks in every record store: VALIDATED under any
-        // type blocks the submission. An entity under a different type
-        // is either a replaceable INCOMPLETE stub — it carries no
-        // provenance payload, only its failure report, and a stale stub
-        // would keep answering GET /records/{id} over the new entity —
-        // or a conflict this write cannot merge into.
+        // An id names one record of one type for its whole life, including
+        // while INCOMPLETE. Only an unpublished record in the same store
+        // can be corrected; conflicts must leave the stored record intact.
         List<RecordEntityDto> stored =
                 atlasAdapter.getRecordEntitiesByQualifiedName(RecordType.entityTypeNames(), recordId);
         RecordEntityDto existing = null;
-        List<RecordEntityDto> replaceableStubs = new ArrayList<>();
         for (RecordEntityDto entity : stored) {
-            if (entity.getRecordStatus() == RecordStatus.VALIDATED) {
+            if (entity.getRecordStatus() == RecordStatus.VALIDATED || !entityType.equals(entity.getTypeName())) {
                 return conflict(recordId, entity);
             }
-            if (entityType.equals(entity.getTypeName())) {
-                existing = entity;
-            } else if (entity.getRecordStatus() == RecordStatus.INCOMPLETE) {
-                replaceableStubs.add(entity);
-            } else {
-                return conflict(recordId, entity);
-            }
-        }
-        for (RecordEntityDto stub : replaceableStubs) {
-            atlasAdapter.deleteRecordEntity(stub.getTypeName(), recordId);
+            existing = entity;
         }
 
         // Inline validation: the same IngestService a queue consumer
@@ -442,13 +428,25 @@ public class IngestResource {
 
     /** The 409 for an id that an existing entity keeps this submission from taking. */
     private static Response conflict(String recordId, RecordEntityDto blocking) {
-        String reason = blocking.getRecordStatus() == RecordStatus.VALIDATED
-                ? "The id belongs to a VALIDATED record, which never changes; publish a changed record under a new id"
-                : "The id is taken by a plain dataset entity that is not a provenance record; "
-                        + "POST /records cannot replace it under another record type";
         return Response.status(409)
-                .entity(new ConflictResponse(recordId, blocking.getRecordStatus(), blocking.getTypeName(), reason))
+                .entity(new ConflictResponse(
+                        recordId,
+                        blocking.getRecordStatus(),
+                        blocking.getTypeName(),
+                        conflictReason(blocking.getRecordStatus())))
                 .build();
+    }
+
+    private static String conflictReason(RecordStatus status) {
+        if (status == RecordStatus.VALIDATED) {
+            return "The id belongs to a VALIDATED record, which never changes; publish a changed record under a new id";
+        }
+        if (status == RecordStatus.INCOMPLETE) {
+            return "The id belongs to an INCOMPLETE record of another type; "
+                    + "a record's type never changes, so submit the other record under a new id";
+        }
+        return "The id is taken by a plain dataset entity that is not a provenance record; "
+                + "POST /records cannot replace it under another record type";
     }
 
     /**

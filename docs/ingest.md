@@ -62,7 +62,8 @@ record store.
 A submission whose `type` is absent or unknown still gets its verdict:
 it fails validation (there is no schema for it) and lands as
 `INCOMPLETE` on the dataset entity, where it stays curatable like any
-other failed record.
+other failed record. Its id remains assigned to the dataset record type;
+correct it as a `ProvenanceRecord`, or use a new id for a training record.
 
 ## The flow
 
@@ -80,8 +81,11 @@ validation" — no verdict-less record ever sits in Atlas awaiting judgment.
 Curating provenance data usually takes several rounds (a missing license,
 an incomplete custody chain, ...), so an invalid record is not rejected
 and thrown away. It is stored as `INCOMPLETE` with its issues attached,
-the owner fixes the document and resubmits it under the same id, and the
-new submission gets a new verdict.
+the owner fixes the document and resubmits it under the same id and record
+type, and the new submission gets a new verdict. An id's record type is
+fixed from the first submission, even while the record is `INCOMPLETE`.
+Submitting another record type under that id returns `409` without
+changing or deleting the original record.
 
 ## The record state model
 
@@ -109,8 +113,8 @@ An id denotes one record. Records are written only via `POST /records`; `/api/v1
 
 | Request | Result |
 |---|---|
-| `POST /records` (JSON-LD body) | `201` new record, `200` resubmission — body: `qualifiedName`, `type`, `recordStatus`, `sha256`, `validatedBy`, `validatedAt`, and for `INCOMPLETE` the `validationIssues` |
-| `POST /records` for an id that is already VALIDATED, or taken by a plain dataset | `409` — body: `qualifiedName`, `recordStatus` (absent for a plain dataset), `entityType` (the store holding the id), `reason` |
+| `POST /records` (JSON-LD body) | `201` new record, `200` resubmission under the same record type — body: `qualifiedName`, `type`, `recordStatus`, `sha256`, `validatedBy`, `validatedAt`, and for `INCOMPLETE` the `validationIssues` |
+| `POST /records` for an id that is already VALIDATED or stored under another entity type | `409` — the stored record is unchanged; body: `qualifiedName`, `recordStatus` (absent for a plain dataset), `entityType` (the store holding the id), `reason` |
 | `POST /records` without a usable `@id`, or unparseable | `400` |
 | `POST /records` with an unsupported content type | `415` |
 | `GET /records/{id}` | `200` record view: `type`, status, the type's mapped attributes, `trainingData` with each dataset's status for a VALIDATED model record, `custodyChain` with each agent's record status for a VALIDATED dataset record, and for INCOMPLETE the issues + verdict context / `404` |

@@ -19,6 +19,7 @@ package org.apache.sourcelume.registry.runtime.quarkus.ingest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -78,6 +79,9 @@ class IngestResourceTest {
     /** A conforming TrainingProvenanceRecord fixture, its id rewritten to this test's record id. */
     private static final String TRAINING_RECORD = trainingRecord();
 
+    private static final String INVALID_TRAINING_RECORD =
+            TRAINING_RECORD.replace("\"disclosure\": \"complete\"", "\"disclosure\": \"invalid\"");
+
     private static final String MODEL_RECORD_ID = "https://sourcelume.apache.org/records/ingest-test-model";
     private static final String UNREGISTERED_DATASET = "https://example.org/datasets/no-record";
     private static final String UPSTREAM_RECORD_ID = "https://sourcelume.apache.org/records/ingest-test-upstream";
@@ -92,6 +96,8 @@ class IngestResourceTest {
         fake.store.clear();
         fake.lookups.clear();
         fake.unreachable.clear();
+        fake.writes = 0;
+        fake.deletes = 0;
     }
 
     @Test
@@ -166,34 +172,67 @@ class IngestResourceTest {
                 "the resubmission explicitly clears the old issues — see CLEARED_VALIDATION_ISSUES");
     }
 
-    /**
-     * The id names one record whichever store the first submission landed
-     * in: an INCOMPLETE stub left under the dataset type is deleted when
-     * the resubmission arrives as a TrainingProvenanceRecord — it may not
-     * stay behind shadowing {@code GET /records/{id}} with a stale verdict.
-     */
     @Test
-    void resubmittingAnIncompleteStubUnderAnotherTypeReplacesIt() {
-        var first = resource.submit(TYPELESS_RECORD.getBytes(StandardCharsets.UTF_8));
-        assertEquals(RecordStatus.INCOMPLETE, ((IngestResource.IngestResponse) first.getEntity()).recordStatus());
+    void incompleteDatasetCannotBeResubmittedAsATrainingRecord() {
+        assertTypeChangeRejected(
+                INVALID_RECORD, TRAINING_RECORD, SourcelumeDatasetDto.TYPE_NAME, SourcelumeModelDto.TYPE_NAME);
+    }
+
+    @Test
+    void incompleteTrainingRecordCannotBeResubmittedAsADataset() {
+        assertTypeChangeRejected(
+                INVALID_TRAINING_RECORD, VALID_RECORD, SourcelumeModelDto.TYPE_NAME, SourcelumeDatasetDto.TYPE_NAME);
+    }
+
+    @Test
+    void typelessRecordCannotMoveToTheModelStore() {
+        assertTypeChangeRejected(
+                TYPELESS_RECORD, TRAINING_RECORD, SourcelumeDatasetDto.TYPE_NAME, SourcelumeModelDto.TYPE_NAME);
+    }
+
+    private void assertTypeChangeRejected(String original, String replacement, String originalType, String newType) {
+        var first = resource.submit(original.getBytes(StandardCharsets.UTF_8));
+        assertEquals(201, first.getStatus());
+        var originalVerdict = (IngestResource.IngestResponse) first.getEntity();
+        assertEquals(RecordStatus.INCOMPLETE, originalVerdict.recordStatus());
+        RecordEntityDto originalEntity = fake.getRecordEntityByQualifiedName(originalType, RECORD_ID);
+        var originalStatus = resource.status(RECORD_ID).getEntity();
+
+        var response = resource.submit(replacement.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(409, response.getStatus());
+        var conflict = (IngestResource.ConflictResponse) response.getEntity();
+        assertEquals(RECORD_ID, conflict.qualifiedName());
+        assertEquals(RecordStatus.INCOMPLETE, conflict.recordStatus());
+        assertEquals(originalType, conflict.entityType());
+        assertTrue(conflict.reason().contains("type"), conflict.reason());
+        assertTrue(conflict.reason().contains("new id"), conflict.reason());
+        assertEquals(1, fake.writes, "a conflicting submission must not write to the backend");
+        assertEquals(0, fake.deletes, "a conflicting submission must not delete the original record");
+        assertEquals(1, fake.store.size());
+        assertSame(originalEntity, fake.getRecordEntityByQualifiedName(originalType, RECORD_ID));
+        assertEquals(original, originalEntity.getRawJsonLd());
+        assertNull(fake.getRecordEntityByQualifiedName(newType, RECORD_ID));
+
+        var status = resource.status(RECORD_ID);
+        assertEquals(200, status.getStatus());
+        assertEquals(originalStatus, status.getEntity(), "the record type and verdict must remain unchanged");
+    }
+
+    @Test
+    void incompleteTrainingRecordCanBeCorrectedUnderTheSameType() {
+        resource.submit(INVALID_TRAINING_RECORD.getBytes(StandardCharsets.UTF_8));
 
         var response = resource.submit(TRAINING_RECORD.getBytes(StandardCharsets.UTF_8));
 
         assertEquals(200, response.getStatus());
-        IngestResource.IngestResponse body = (IngestResource.IngestResponse) response.getEntity();
+        var body = (IngestResource.IngestResponse) response.getEntity();
         assertEquals(RecordStatus.VALIDATED, body.recordStatus());
-
-        assertNull(
-                fake.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, RECORD_ID),
-                "the stale dataset stub must be deleted, not shadowed");
-        assertNotNull(
-                fake.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, RECORD_ID),
-                "the resubmission lands on the model entity");
-
-        var status = resource.status(RECORD_ID);
-        IngestResource.RecordResponse statusBody = (IngestResource.RecordResponse) status.getEntity();
-        assertEquals(RecordStatus.VALIDATED, statusBody.recordStatus());
-        assertEquals("TrainingProvenanceRecord", statusBody.type());
+        assertEquals("TrainingProvenanceRecord", body.type());
+        assertEquals(
+                TRAINING_RECORD,
+                fake.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, RECORD_ID)
+                        .getRawJsonLd());
     }
 
     /**
@@ -604,6 +643,8 @@ class IngestResourceTest {
         final java.util.Map<String, Integer> lookups = new java.util.HashMap<>();
 
         final java.util.Set<String> unreachable = new java.util.HashSet<>();
+        int writes;
+        int deletes;
 
         @Override
         public boolean isServerReady() {
@@ -622,6 +663,7 @@ class IngestResourceTest {
 
         @Override
         public String createOrUpdateRecordEntity(RecordEntityDto record) {
+            writes++;
             store.put(new StoreKey(record.getTypeName(), record.getQualifiedName()), record);
             return record.getGuid() != null ? record.getGuid() : "guid-1";
         }
@@ -637,6 +679,7 @@ class IngestResourceTest {
 
         @Override
         public void deleteRecordEntity(String entityType, String qualifiedName) {
+            deletes++;
             store.remove(new StoreKey(entityType, qualifiedName));
         }
 

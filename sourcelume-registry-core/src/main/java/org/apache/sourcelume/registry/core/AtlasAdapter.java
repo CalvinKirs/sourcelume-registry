@@ -113,12 +113,8 @@ public interface AtlasAdapter {
 
     /**
      * Deletes the record entity stored under the given type and qualified
-     * name. The ingest guard uses it to replace an INCOMPLETE stub that sits
-     * in a different record store than the resubmission targets — a stub
-     * carries no provenance payload, only its failure report, so deleting it
-     * loses nothing. Backends that soft-delete (Atlas marks entities
-     * DELETED) leave the registry's lookups blind to the removed stub, which
-     * is exactly what the replacement needs.
+     * name. Backends may soft-delete (Atlas marks entities DELETED); the
+     * registry's lookups must no longer return the deleted entity.
      *
      * @param entityType    the backend entity type the entity is stored under
      * @param qualifiedName the qualified name of the entity to delete

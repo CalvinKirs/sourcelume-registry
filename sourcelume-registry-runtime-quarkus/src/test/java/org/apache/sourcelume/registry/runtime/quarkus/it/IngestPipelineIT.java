@@ -187,15 +187,9 @@ class IngestPipelineIT {
         assertEquals("complete", stored.getDisclosure());
     }
 
-    /**
-     * Cross-type resubmission: a document without {@code type} lands as an
-     * INCOMPLETE dataset stub; the corrected resubmission declares
-     * TrainingProvenanceRecord, and the stub is deleted rather than left
-     * shadowing the status view with a stale verdict.
-     */
     @Test
-    void trainingRecordReplacesTheIncompleteDatasetStub() throws Exception {
-        String recordId = uniqueId("replace-stub");
+    void trainingRecordCannotReplaceAnIncompleteDataset() throws Exception {
+        String recordId = uniqueId("type-conflict");
         String typeless = fixture("/records/it-valid.jsonld", recordId).replace("\"type\": \"ProvenanceRecord\",", "");
 
         given().contentType("application/ld+json")
@@ -205,6 +199,7 @@ class IngestPipelineIT {
                 .then()
                 .statusCode(201)
                 .body("recordStatus", org.hamcrest.Matchers.equalTo("INCOMPLETE"));
+        SourcelumeDatasetDto original = storedDataset(recordId);
 
         String training = fixture("/records/it-training-valid.jsonld", recordId);
         given().contentType("application/ld+json")
@@ -212,21 +207,29 @@ class IngestPipelineIT {
                 .when()
                 .post("/records")
                 .then()
-                .statusCode(200)
-                .body("type", org.hamcrest.Matchers.equalTo("TrainingProvenanceRecord"))
-                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"));
+                .statusCode(409)
+                .body("entityType", org.hamcrest.Matchers.equalTo(SourcelumeDatasetDto.TYPE_NAME))
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("INCOMPLETE"))
+                .body("reason", org.hamcrest.Matchers.containsString("new id"));
 
         given().urlEncodingEnabled(false)
                 .when()
                 .get("/records/" + java.net.URLEncoder.encode(recordId, StandardCharsets.UTF_8))
                 .then()
                 .statusCode(200)
-                .body("type", org.hamcrest.Matchers.equalTo("TrainingProvenanceRecord"))
-                .body("recordStatus", org.hamcrest.Matchers.equalTo("VALIDATED"));
+                .body("type", org.hamcrest.Matchers.equalTo("ProvenanceRecord"))
+                .body("recordStatus", org.hamcrest.Matchers.equalTo("INCOMPLETE"))
+                .body("sha256", org.hamcrest.Matchers.equalTo(original.getSha256()))
+                .body("validationIssues", org.hamcrest.Matchers.equalTo(original.getValidationIssues()))
+                .body("validatedBy", org.hamcrest.Matchers.equalTo(original.getValidatedBy()))
+                .body("validatedAt", org.hamcrest.Matchers.equalTo(original.getValidatedAt()));
 
+        SourcelumeDatasetDto retained = storedDataset(recordId);
+        assertEquals(original.getGuid(), retained.getGuid());
+        assertEquals(typeless, retained.getRawJsonLd());
         assertNull(
-                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeDatasetDto.TYPE_NAME, recordId),
-                "the dataset stub must be deleted, not shadowed");
+                atlasAdapter.getRecordEntityByQualifiedName(SourcelumeModelDto.TYPE_NAME, recordId),
+                "a conflicting submission must not create a model record");
     }
 
     @Test
